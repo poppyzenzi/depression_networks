@@ -115,5 +115,3 @@ grid.arrange(grobs = strength_plot_list, ncol = 3)
 differenceTest(boot1,"PSDHS00","PSDNC00","strength")
 
 
-# MCS uses 4 point likert - invariance testing will be polytomous 
-
