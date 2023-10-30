@@ -72,8 +72,8 @@ theme = 'Reddit'
 # Loop through the results and generate plot for estimated networks
 for (sweep_value in names(network_list)) {
   results <- network_list[[sweep_value]]
-  qgraph(results$graph, layout='spring', theme=theme, labels = labels)
-  #centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
+  #qgraph(results$graph, layout='spring', theme=theme, labels = labels)
+  centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
   title(paste("Sweep =", sweep_value), adj=0.8)  # line = -0.1 to lower
 }
 
@@ -113,5 +113,4 @@ grid.arrange(grobs = strength_plot_list, ncol = 3)
 
 # test for difference in strength between node x and y
 differenceTest(boot1,"PSDHS00","PSDNC00","strength")
-
 
