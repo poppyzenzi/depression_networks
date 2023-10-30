@@ -1,5 +1,11 @@
-library(haven)
+############################################## 
+####### ALSPAC quality control script ########
+##### get symptoms scores in wide format #####
+##### for downstream network analysis ########
+##############################################
+
 library(tidyr)
+library(haven)
 library(dplyr)
 library(purrr)
 library(data.table)
@@ -7,23 +13,8 @@ library(bootnet)
 library(qgraph)
 library(graphicalVAR)
 
-'script to get smfq symptom scores in wide format'
-  
-'I felt miserable or unhappy 
-I didn’t enjoy anything at all 
-I felt so tired I just sat around and did nothing 
-I was very restless
- I felt I was no good any more 
- I cried a lot 
-I found it hard to think properly and concentrate 
- I hated myself 
- I was a bad person 
-I felt lonely
-I thought nobody really loved me 
-I thought I could never be as good as other kids 
-I did everything wrong'
-
-setwd("/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/gmm")
+# set wd
+setwd("/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/networks/depression_networks")
 
 # read in alspac data and make subject variable
 alspac <- read_dta("/Volumes/cmvm/scs/groups/ALSPAC/data/B3421_Whalley_04Nov2021.dta") %>%
@@ -72,75 +63,32 @@ colnames(data_wide)
 
 x <- data_wide %>%
   gather(key, value, -id, -sex, -ethnicity) %>%
-  extract(key, c("time", "question"), "(t.)\\.(..)") 
+  extract(key, c("time", "question"), "(t.)\\.(..)") %>%
+  as.data.frame(.)
 
-x <- as.data.frame(x)
-
-test <- x[,c(1,4,5,6)]
+selection <- x[,c(1,4,5,6)]
 
 # Convert data frame to a data.table
-setDT(test)
+setDT(selection)
 
 # Reshape the data using dcast
-reshaped <- dcast(test, id + time ~ question, value.var = "value")
+reshaped <- dcast(selection, id + time ~ question, value.var = "value")
 
 print(reshaped)
+length(unique(reshaped$id))
 
-###############
-### see other script 
-# filter for only valid scores (0-3) check this? actually 1-3
-smfq_symptoms <- reshaped %>%
-  filter(if_all(.cols = all_of(names(reshaped)[3:15]), ~ . >= 0 & . <= 3))
+write.table(reshaped, "/Volumes/igmm/GenScotDepression/users/poppy/alspac/smfq_sypmtoms_wide")
 
-
-smfq_binary <- smfq_symptoms %>%
-  mutate(across(3:15, ~case_when(
-    . == 1 ~ 1,
-    . == 2 ~ 1,
-    . == 3 ~ 0,
-    TRUE ~ .
-  )))
-
-# checks - should be n=8787
-length(unique(smfq_binary$id))
-
-
-
-
-
-
-
-
-####
-
-# estimating simplest network PMRF
-
-pmrf <- estimateNetwork(smfq_symptoms[,3:15], 
-                        default = "pcor",     #we'll check a few later
-                        corMethod = "cor"     #cor, cov, spearman... #,fun
-                        #, labels = c()         #a character vector if names other than columns are to be used
-                        #, .dots = list()
-                        #, weighted =           #logical, should the network be weighted?
-                        #, signed =             #logical, should the networks' relations have signs?
-                        #, directed =           #logical, is the network directed? detected automatically
-)                     #Question, what are the values of the arguments weighted, signed, and directed in our case?
-
-plot(pmrf)
-
-#############
-
-# list not working 
-vars = as.list(colnames(smfq_symptoms[,3:15]))
-
-graphicalVAR(smfq_symptoms, vars=vars, idvar=id, dayvar=time)
-
-
-# choose time point
-#timepoint = smfq_symptoms$time == "t1"
-
-# run bootnet for timepoint and symptom cols 
-results <- bootnet(symptoms[,3:15], 
-                   nBoots = 100, default = "ggmModSelect")
-
-# plot network
-plot(results$sample)
+'I felt miserable or unhappy 
+I didn’t enjoy anything at all 
+I felt so tired I just sat around and did nothing 
+I was very restless
+ I felt I was no good any more 
+ I cried a lot 
+I found it hard to think properly and concentrate 
+ I hated myself 
+ I was a bad person 
+I felt lonely
+I thought nobody really loved me 
+I thought I could never be as good as other kids 
+I did everything wrong'
