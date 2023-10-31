@@ -16,6 +16,8 @@ library(gridExtra)
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
 smfq_dat <- read.table('smfq_sypmtoms_wide.txt', check.names = FALSE)
 
+# SMFQ: 1 = true, 2 = sometimes, 3 = not
+
 # check right order
 labels <- c("unhappy", 
             "anhedonia", 
@@ -31,27 +33,43 @@ labels <- c("unhappy",
             "inadequate",
             "incompetent")
 
-#####################################
 
-## quality control
+############# quality control ###############
 
 ## filter for only valid symptom scores btw 0-3
 smfq_symptoms <- smfq_dat %>%
-  filter(if_all(.cols = all_of(names(reshaped)[3:15]), ~ . >= 0 & . <= 3))
+  filter(if_all(.cols = all_of(names(reshaped)[3:ncol(smfq_symptoms)]), ~ . >= 0 & . <= 3))
 
 ## decide here if want to make binary 
-#smfq_binary <- smfq_symptoms %>%
-#  mutate(across(3:15, ~case_when(
-#    . == 1 ~ 1,
-#    . == 2 ~ 1,
-#    . == 3 ~ 0,
-#    TRUE ~ .
-#  )))
+smfq_binary <- smfq_symptoms %>%
+  mutate(across(3:15, ~case_when(
+    . == 1 ~ 1,
+    . == 2 ~ 1,
+    . == 3 ~ 0,
+    TRUE ~ .
+  )))
+
+smfq_symptoms <- smfq_binary
 
 # make time col numeric
 mapping <- c("t1" = 1, "t2" = 2, "t3" = 3, "t4" = 4)
 smfq_symptoms$time <- mapping[smfq_symptoms$time]
-###################################
+
+#####################################
+
+#### symptom frequency table #####
+freq_dat <- smfq_symptoms
+colnames(freq_dat) <- c("id","time", unlist(labels))
+
+frequency_table <- freq_dat %>%
+  gather(symptom, value, `unhappy`:`incompetent`) %>% # gather symptoms into key value pairs 
+  group_by(time, symptom) %>% # group by time/sweep
+  summarize(count = sum(value)) %>%
+  spread(time, count, fill = 0)
+
+print(frequency_table)
+write.csv(frequency_table, file="alspac_symptom_frequencies.csv")
+
 
 ####### run bootnet sample ########
 
@@ -61,7 +79,7 @@ result_list <- list()
 # run bootnet loop over sweeps
 for (wave in c(1,2,3,4)) {
   timepoint <- smfq_symptoms$time == wave
-  data_subset <- smfq_symptoms[timepoint, 3:15]
+  data_subset <- smfq_symptoms[timepoint, 3:ncol(smfq_symptoms)]
   results <- bootnet(data_subset, nBoots=20, default="ggmModSelect")
   result_list[[as.character(wave)]] <- results
 }
@@ -87,7 +105,7 @@ network_list <- list()
 
 for (wave in c(1,2,3,4)) {
   timepoint <- smfq_symptoms$time == wave
-  data_subset <- smfq_symptoms[timepoint, 3:15]
+  data_subset <- smfq_symptoms[timepoint, 3:ncol(smfq_symptoms)]
   network <- estimateNetwork(data_subset,default="ggmModSelect")
   network_list[[as.character(wave)]] <- network
 }
@@ -145,26 +163,64 @@ differenceTest(boot1, s1, s2, "strength")
 ####################### genetic data ###########################
 ################################################################
 
-setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/prs/prs_alspac_OUT/all_thresholds')
-mdd_prs <- read.table('alspac_mdd_ipsych_prs_0816.t4.best', header = TRUE) 
-mdd_prs <- mdd_prs[,c(2,4)]
+labels <- c("unhappy", 
+            "anhedonia", 
+            "apathetic", 
+            "restless", 
+            "worthless", 
+            "tearful",
+            "distracted",
+            "self-loathing",
+            "guilty",
+            "isolated",
+            "unloved",
+            "inadequate",
+            "incompetent",
+            "PRS")
+
+setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/prs/prs_alspac_OUT')
+prs <- read.table('alspac_mdd_prs_0320.best', header = TRUE)
+prs <- prs[,c(2,4)]
 
 # make IDs the same in the symptom data
 smfq_qc <- smfq_symptoms %>% mutate(id = gsub("_", "", id)) %>% rename('IID'='id')
 # merge on IID
-symp_gen <- merge(smfq_qc, mdd_prs, by = 'IID')
+symp_gen <- merge(smfq_qc, prs, by = 'IID')
 length(unique(symp_gen$IID)) # N=6096 with symptom and genetic data
                 
-####### run bootnet sample ########
+## fix scoring 
+# currently: 1 = true, 2 = sometimes, 3 = not
+# can also make binary here
+symp_gen <- symp_gen %>%
+   mutate(across(3:15, ~case_when(
+    . == 1 ~ 1,
+    . == 2 ~ 1,
+    . == 3 ~ 0,
+    TRUE ~ .
+  )))
+
+# normalise PRS to [0,1]
+#symp_gen$PRS <- (scale(symp_gen$PRS) - min(scale(symp_gen$PRS))) / (max(scale(symp_gen$PRS)) - min(scale(symp_gen$PRS)))
+
+## mixed graphical model for mixed data types
+
+prs_network <- estimateNetwork(symp_gen[,3:ncol(symp_gen)], default="EBICglasso")
+qgraph(prs_network$graph, layout='spring', theme='colorblind', labels = labels)
+
+
+
+
+
+###### run bootnet for sample ######
 
 # empty list
 result_list <- list()
 
 # run bootnet loop over sweeps
 for (wave in c(1,2,3,4)) {
-  timepoint <- smfq_symptoms$time == wave
-  data_subset <- smfq_symptoms[timepoint, 3:15]
-  results <- bootnet(data_subset, nBoots=20, default="ggmModSelect")
+  timepoint <- symp_gen$time == wave
+  data_subset <- symp_gen[timepoint, 3:ncol(symp_gen)]
+  results <- bootnet(data_subset, nBoots=20, default="ggmModSelect", covar)
   result_list[[as.character(wave)]] <- results
 }
 
@@ -172,6 +228,28 @@ for (wave in c(1,2,3,4)) {
 for (wave in names(result_list)) {
   results <- result_list[[wave]]
   plot(results$sample, label = labels)
+  title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
+}
+
+
+## estimate network 
+
+network_list <- list()
+
+for (wave in c(1,2,3,4)) {
+  timepoint <- symp_gen$time == wave
+  data_subset <- symp_gen[timepoint, 3:ncol(symp_gen)]
+  network <- estimateNetwork(data_subset,default="ggmModSelect")
+  network_list[[as.character(wave)]] <- network
+}
+
+theme = 'Reddit'
+
+# Loop through the results and generate plot for estimated networks
+for (wave in names(network_list)) {
+  results <- network_list[[wave]]
+  qgraph(results$graph, layout='spring', pastel=TRUE, labels = labels)
+  #centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
   title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
 }
 

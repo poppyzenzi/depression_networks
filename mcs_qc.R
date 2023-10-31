@@ -71,19 +71,23 @@ sdq_symp_3wav_unique <- unique(sdq_sym_3wav)
 
 #################################################
 
-
-# symptoms scoring -1 (NA), 1-4 likert 
+## QC SYMPTOM SCORES
+# -1 = NA, 1 = not true, 2 = somewhat true, 3 = certainly true, 4 = blank
+# symptoms scoring -1 (NA)
 df <- sdq_symp_3wav_unique %>%
-        replace(. == -1, NA)
-
+        replace(. == -1, NA) %>%
+        replace(. == 4, NA) %>%
+        replace(. == 1, 0) %>%
+      replace(. == 2, 1) %>%
+      replace(. == 3, 1) %>%
+      replace(. == -9, NA)
+  
 # rename with sweep numbers s5 s6 s7
 colnames(df) <- c("ID", "s5PSDHS00", "s5PSDMW00", "s5PSDUD00", "s5PSDNC00", "s5PSDFE00", "s5PSDSP00", "s5PSDGF00",
                   "s5PSDLC00", "s5PSDPB00", "s5PSDGB00", "s6PSDHS00", "s6PSDMW00", "s6PSDUD00", "s6PSDNC00", "s6PSDFE00",
                   "s6PSDSP00", "s6PSDGF00", "s6PSDLC00", "s6PSDPB00", "s6PSDGB00", "s7PSDHS00", "s7PSDMW00", "s7PSDUD00",
                   "s7PSDNC00", "s7PSDFE00", "s7PSDSP00", "s7PSDGF00", "s7PSDLC00", "s7PSDPB00", "s7PSDGB00"
                   )
-
-# fix reverse scored items ?
 
 # save wide
 write.table(df, 'symptom_data/mcs_sdq_sym_wide.txt')

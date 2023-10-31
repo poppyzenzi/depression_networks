@@ -21,6 +21,8 @@ library(bootnet)
 18 I am unhappy, sad, or depressed	
 19 I worry a lot'
 
+labels <- c("worthless","anxious","guilty","self-conscious","unhappy","worry")
+
 bpm <- read.csv('/Volumes/igmm/GenScotDepression/data/abcd/release5.0/core/mental-health/mh_y_bpm.csv')
 symptoms = c('bpm_9_y','bpm_11_y','bpm_12_y','bpm_13_y','bpm_18_y','bpm_19_y')
 int_cols = c('src_subject_id','eventname','bpm_y_scr_internal_r', symptoms)
@@ -41,7 +43,7 @@ bpm_int <- bpm %>%
                               `4_year_follow_up_y_arm_1`="8"))
 
 # make sum score
-bpm_int$sumscore <- rowSums(bpm_int[symptoms])
+#bpm_int$sumscore <- rowSums(bpm_int[symptoms])
 
 # save wide df with sum score only
 bpm_sum_wide <- bpm_int %>%
@@ -59,6 +61,21 @@ bpm_sum_wide[is.na(bpm_sum_wide)] <- -9999 # missing
 # now save
 write.table(bpm_sum_wide, "/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/networks/mplus_ri_clpm/bpm_sum_wide.txt") # now save 
 
+#### symptom frequency table #####
+freq_dat <- bpm_int
+colnames(freq_dat) <- c("id","time", "sum", unlist(labels))
+
+frequency_table <- freq_dat %>%
+  gather(symptom, value, `worthless`:`worry`) %>% # gather symptoms into key value pairs 
+  group_by(time, symptom) %>% # group by time/sweep
+  summarize(count = sum(value)) %>%
+  spread(time, count, fill = 0)
+
+print(frequency_table)
+setwd("/Volumes/igmm/GenScotDepression/users/poppy/abcd/symptom_data")
+write.csv(frequency_table, file="abcd_symptom_frequencies.csv")
+
+##########################
 
 # choose time point
 timepoint = bpm_int$eventname == 3

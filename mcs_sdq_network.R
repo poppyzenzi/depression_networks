@@ -31,6 +31,22 @@ labels <- c("malaise",
 # * reverse scored
 legend <- c("* reverse scored")
 
+#### symptom frequency table #####
+freq_dat <- sdq_long
+colnames(freq_dat) <- c("id","sweep", unlist(labels))
+
+frequency_table <- freq_dat %>%
+  gather(symptom, value, `malaise`:`adult-oriented`) %>% # gather symptoms into key value pairs 
+  group_by(sweep, symptom) %>% # group by time/sweep
+  summarize(count = sum(value)) %>%
+  spread(sweep, count, fill = 0)
+
+print(frequency_table)
+write.csv(frequency_table, file="symptom_data/mcs_symptom_frequencies.csv", header=TRUE)
+
+############################## 
+######## run bootnet ########
+
 # empty list
 result_list <- list()
 
