@@ -16,7 +16,7 @@ labels <- c("worthless","anxious","guilty","self-conscious","unhappy","worry")
 
 bpm <- read.csv('/Volumes/igmm/GenScotDepression/data/abcd/release5.0/core/mental-health/mh_y_bpm.csv')
 symptoms = c('bpm_9_y','bpm_11_y','bpm_12_y','bpm_13_y','bpm_18_y','bpm_19_y')
-int_cols = c('src_subject_id','eventname','bpm_y_scr_internal_r', symptoms)
+int_cols = c('src_subject_id','eventname', symptoms)
 
 # select cols for internalising, only for values 0-2 in symptoms (valid)
 bpm_int <- bpm %>% 
@@ -33,15 +33,22 @@ bpm_int <- bpm %>%
                               `42_month_follow_up_arm_1`="7",
                               `4_year_follow_up_y_arm_1`="8"))
 
-# make sum score
-#bpm_int$sumscore <- rowSums(bpm_int[symptoms])
+
+## recode scores to binary 1 true 0 not true
+bpm_binary <- bpm_int %>%
+  mutate(across(3:ncol(.), ~case_when(
+    . == 2 ~ 1,
+    TRUE ~ .
+  )))
+
+bpm_int <- bpm_binary
 
 #####################################
 ########## symptom tables ###########
 
 # frequency table
 freq_dat <- bpm_int
-colnames(freq_dat) <- c("id","time", "sum", unlist(labels))
+colnames(freq_dat) <- c("id","time", unlist(labels))
 
 frequency_table <- freq_dat %>%
   gather(symptom, value, `worthless`:`worry`) %>% # gather symptoms into key value pairs 
@@ -74,7 +81,7 @@ network_list <- list()
 
 for (wave in c(2,4,6,8)) {
   timepoint <- bpm_int$eventname == wave
-  data_subset <- bpm_int[timepoint, 4:ncol(bpm_int)]
+  data_subset <- bpm_int[timepoint, 3:ncol(bpm_int)]
   network <- estimateNetwork(data_subset,default="ggmModSelect")
   network_list[[as.character(wave)]] <- network
 }
@@ -84,7 +91,7 @@ for (wave in names(network_list)) {
   results <- network_list[[wave]]
   qgraph(results$graph, layout='spring', theme=theme, labels = labels)
   #centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
-  title(paste("Wave =", wave), adj=1.0, line= -1.0) 
+  title(paste("Wave =", wave), adj=0.8, line= -1.0) 
 }
 
 ######################################
@@ -96,7 +103,7 @@ boot1_result_list <- list()
 ## for each wave run bootnet and store results in list 
 for (wave in names(network_list)) {
   results <- network_list[[wave]]
-  boot1<-bootnet(results, nBoots=1000, default="ggmModSelect", nCores=1)
+  boot1<-bootnet(results, nBoots=100, default="ggmModSelect", nCores=1)
   boot1_result_list[[as.character(wave)]] <- boot1
 }
 
@@ -146,25 +153,28 @@ symp_gen <- merge(bpm_qc, prs, by = 'IID')
 length(unique(symp_gen$IID)) # N=4135 with symptom and genetic data
 
 # normalise PRS to [0,1] ?
-#symp_gen$PRS <- (scale(symp_gen$PRS) - min(scale(symp_gen$PRS))) / (max(scale(symp_gen$PRS)) - min(scale(symp_gen$PRS)))
+symp_gen$PRS <- (scale(symp_gen$PRS) - min(scale(symp_gen$PRS))) / (max(scale(symp_gen$PRS)) - min(scale(symp_gen$PRS)))
 
 ## mixed graphical model for mixed data types
 prs_network_list <- list()
 
 for (wave in c(2,4,6,8)) {
   timepoint <- symp_gen$time == wave
-  data_subset <- symp_gen[timepoint, 4:ncol(symp_gen)]
-  prs_network <- estimateNetwork(symp_gen[,4:ncol(symp_gen)], default="EBICglasso")
+  data_subset <- symp_gen[timepoint, 3:ncol(symp_gen)]
+  prs_network <- estimateNetwork(symp_gen[,3:ncol(symp_gen)], default="EBICglasso")
   prs_network_list[[as.character(wave)]] <- prs_network
 }
+
+## ! check warnings 
 
 # Loop through the results and generate plot for estimated networks
 for (wave in names(prs_network_list)) {
   results <- prs_network_list[[wave]]
   qgraph(results$graph, layout='spring', theme='colorblind', labels=c(unlist(labels),"PRS"))
-  title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
+  title(paste("Wave =", wave), adj=0.8, line = -1.0) 
 }
 
+# all networks same - why?
 
 ####################################
 ############# for mplus  ###########
