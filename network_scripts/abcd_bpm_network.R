@@ -1,9 +1,9 @@
 library(dplyr)
-#library(psychTools)
 library(qgraph)
 library(tidyr)
 library(bootnet)
 
+# split into QC and network scripts 
 
 # node strength = how well directly connected to others
 # node closeness = how well indirectly connected to other nodes
@@ -45,22 +45,6 @@ bpm_int <- bpm %>%
 # make sum score
 #bpm_int$sumscore <- rowSums(bpm_int[symptoms])
 
-# save wide df with sum score only
-bpm_sum_wide <- bpm_int %>%
-  subset(select = c('src_subject_id','eventname','sumscore')) %>%
-  pivot_wider(
-  data = .,
-  id_cols = src_subject_id,  # Identifier column
-  names_from = eventname,    # Column to spread
-  values_from = c(sumscore)  # Values to fill the columns
-)
-
-colnames(bpm_sum_wide) <- c('src_subject_id','t1','t2','t3','t4','t5','t6','t7','t8') # rename cols
-bpm_sum_wide[is.na(bpm_sum_wide)] <- -9999 # missing
-
-# now save
-write.table(bpm_sum_wide, "/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/networks/mplus_ri_clpm/bpm_sum_wide.txt") # now save 
-
 #### symptom frequency table #####
 freq_dat <- bpm_int
 colnames(freq_dat) <- c("id","time", "sum", unlist(labels))
@@ -75,17 +59,26 @@ print(frequency_table)
 setwd("/Volumes/igmm/GenScotDepression/users/poppy/abcd/symptom_data")
 write.csv(frequency_table, file="abcd_symptom_frequencies.csv")
 
-##########################
+###################################
+####### run bootnet sample ########
 
-# choose time point
-timepoint = bpm_int$eventname == 3
+# empty list
+result_list <- list()
 
-# run bootnet for timepoint and symptom cols 
-results <- bootnet(bpm_int[timepoint, 4:9], 
-                    nBoots = 100, default = "ggmModSelect")
+# run bootnet loop over sweeps
+for (wave in c(2,4,6,8)) {
+  timepoint <- bpm_int$eventname == wave
+  data_subset <- bpm_int[timepoint, 4:ncol(bpm_int)]
+  results <- bootnet(data_subset, nBoots=20, default="ggmModSelect")
+  result_list[[as.character(wave)]] <- results
+}
 
-# plot network
-plot(results$sample)
+# Loop through the results and generate plots
+for (wave in names(result_list)) {
+  results <- result_list[[wave]]
+  plot(results$sample, label = labels)
+  title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
+}
 
 # ===============================
 

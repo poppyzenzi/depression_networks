@@ -70,6 +70,15 @@ frequency_table <- freq_dat %>%
 print(frequency_table)
 write.csv(frequency_table, file="alspac_symptom_frequencies.csv")
 
+prop_table <- freq_dat %>%
+  gather(symptom, value, `unhappy`:`incompetent`) %>% # explicitly specify the order of symptoms
+  group_by(time, symptom) %>% # group by time/sweep
+  summarize(proportion = sum(value == 1) / n()) %>% # calculate proportion of "yes" responses
+  spread(time, proportion, fill = 0)
+
+print(prop_table)
+write.csv(prop_table, file="alspac_symptom_proportions.csv")
+
 
 ####### run bootnet sample ########
 
