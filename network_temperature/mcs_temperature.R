@@ -1,5 +1,5 @@
 #########################
-## ALSPAC network temp
+## MCS network temp
 #########################
 library (foreign)
 library(bootnet)
@@ -10,26 +10,22 @@ library (qgraph)
 #########################
 #Data
 
-setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
-smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
+setwd('/Volumes/igmm/GenScotDepression/users/poppy/mcs/symptom_data')
+mcs_qcd <- read.table('mcs_sdq_sym_long.txt', check.names = FALSE)
 
-labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
-            "tearful", "distracted", "self-loathing", "guilty", "isolated", 
-            "unloved", "inadequate", "incompetent")
+labels <- c("malaise", "worries", "unhappy", "anxiety","fears", "solitary",
+            "friends*","liked*","bullied", "adult-oriented")
 
-colnames(smfq_qcd) <- c('id', 'time', unlist(labels))
+colnames(mcs_qcd) <- c('id', 'time', unlist(labels))
 
 #recode variables so that each variable is binary with +1 and -1 
-smfq_qcd <- smfq_qcd %>%
-  mutate(across(3:15, ~case_when(
+mcs_qcd <- mcs_qcd %>%
+  mutate(across(3:12, ~case_when(
     . == 1 ~ 1,
     . == 0 ~ -1,
     TRUE ~ .
   )))
 
-# remove second wave
-filtered <- smfq_qcd[smfq_qcd$time != 2, ]
-smfq_qcd <- filtered
 
 ### fit psychonetrics model
 
@@ -42,10 +38,10 @@ smfq_qcd <- filtered
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(smfq_qcd)[3:15]
+vars <- names(mcs_qcd)[3:12]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(smfq_qcd, vars = vars, groups = "time")
+model1 <- Ising(mcs_qcd, vars = vars, groups = "time")
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
@@ -79,6 +75,7 @@ psychonetrics::compare(
 ) %>% arrange(BIC) 
 
 #extract and plot network
+# "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
 network_smfq <- getmatrix(model2, "omega")[[1]]
 graph_smfq <- qgraph(network_smfq, layout = 'spring', labels = vars, theme = 'colorblind')
 
@@ -91,52 +88,49 @@ fields_smfq <- lapply(getmatrix(model2, 'tau'), 'mean')
 
 ### plotting
 
-pdf('alspac_network_temp.pdf', 7, 5)
+pdf('mcs_network_temp.pdf', 7, 5)
 layout(matrix(c(1,1,2,2,2,2,2,3,3,3,3,3,
                 4,4,4,4,5,5,5,5,6,6,6,6), 2, 12, byrow = TRUE))
 
 par(mar = rep(0,4))
 plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
-legend('center', c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
-                   "tearful", "distracted", "self-loathing", "guilty", "isolated", 
-                   "unloved", "inadequate", "incompetent"), 
-       title = 'SMFQ items', col = 'darkorange', pch = 19,
+legend('center', labels, 
+       title = 'SDQ items', col = 'darkorange', pch = 19,
        cex = 0.8, bty = 'n')
 
 # a label at 3rd margin (top) at 0.1 along and right justification (2)
 mtext('(a)', 3, at = .01, padj = 2)
 
 qgraph(network_smfq, layout = 'spring', 
-       groups = list(1:13), palette = 'colorblind',
+       groups = list(1:10), palette = 'colorblind',
        legend = FALSE, theme = 'colorblind',
-       labels = c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
-                  "tearful", "distracted", "self-loathing", "guilty", "isolated", 
-                  "unloved", "inadequate", "incompetent"), vsize = 12)
+       labels = labels, vsize = 12)
 
 par(mar = rep(2,4), cex.main = 0.8)
 
 plot(1/temp_smfq, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
-     #ylim = c(.85, 1), 
+     ylim = c(.9, 1), 
      type = 'b', main = 'Change in network temperature')
 axis(1, c(seq(1, 3, 1)), c('11', '14', '17'))
-axis(2, c(seq(.8, 2, .05)))
+axis(2, c(seq(.75, 2, .05)))
 mtext('(b)', 3, at = .32, padj = -2)
 
 par(mar = c(6, 4, 6, 2))
 
 # histograms of overall depression score 
-smfq_qcd$total <- rowSums(smfq_qcd[,3:15])
+mcs_qcd$total <- rowSums(mcs_qcd[,3:12])
 
-hist(smfq_qcd$total[smfq_qcd$time==1], main = 'Age 11', xlab = 'Overall depression')
+breaks <- seq(min(mcs_qcd$total, na.rm = TRUE), max(mcs_qcd$total, na.rm = TRUE), length.out = 10)
+
+hist(mcs_qcd$total[mcs_qcd$time==5], main = 'Age 11', xlab = 'Overall depression', breaks=breaks)
 mtext('(c)', 3, at = -46, padj = -4)
 
 par(mar = c(6, 3, 6, 3))
 
-#hist(smfq_qcd$total[smfq_qcd$time==2], main = 'Age 13', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
-hist(smfq_qcd$total[smfq_qcd$time==3], main = 'Age 14', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
+hist(mcs_qcd$total[mcs_qcd$time==6], main = 'Age 14', xlab = 'Overall depression', breaks=breaks)
 
 par(mar = c(6, 2, 6, 4))
 
-hist(smfq_qcd$total[smfq_qcd$time==4], main = 'Age 17', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
+hist(mcs_qcd$total[mcs_qcd$time==7], main = 'Age 17', xlab = 'Overall depression', breaks=breaks)
 
 dev.off()

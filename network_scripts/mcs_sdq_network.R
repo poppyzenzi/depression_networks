@@ -5,15 +5,6 @@ library(tidyr)
 library(bootnet)
 library(gridExtra)
 
-# node strength = how well directly connected to others
-# node closeness = how well indirectly connected to other nodes
-# betweenness = how important in average path between two others
-
-## pairwise Markov random field (PMRF)
-# binary data = Ising model, multivariate normal density = GGM, 
-# non-nomral conitnuous = requires nonparanomral transformation before estimating GGM)
-# mixed graphical models can estimate PMRF w both cont and cat vars 
-
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/mcs')
 sdq_wide <- read.table('symptom_data/mcs_sdq_sym_wide.txt')
 sdq_long <- read.table('symptom_data/mcs_sdq_sym_long.txt')
@@ -42,7 +33,7 @@ frequency_table <- freq_dat %>%
   spread(sweep, count, fill = 0)
 
 print(frequency_table)
-write.csv(frequency_table, file="symptom_data/mcs_symptom_frequencies.csv", header=TRUE)
+write.csv(frequency_table, file="symptom_data/mcs_symptom_frequencies.csv")
 
 ############################## 
 ######## run bootnet ########
@@ -62,7 +53,7 @@ for (sweep_value in c(5,6,7)) {
 for (sweep_value in names(result_list)) {
   results <- result_list[[sweep_value]]
   plot(results$sample, label = labels)
-  title(paste("Sweep =", sweep_value), adj=0.8)  # line = -0.1 to lower
+  #title(paste("Sweep =", sweep_value), adj=0.8)
 }
 
 # ===============================
