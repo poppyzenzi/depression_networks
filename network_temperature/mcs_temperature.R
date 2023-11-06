@@ -76,14 +76,14 @@ psychonetrics::compare(
 
 #extract and plot network
 # "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
-network_smfq <- getmatrix(model2, "omega")[[1]]
-graph_smfq <- qgraph(network_smfq, layout = 'spring', labels = vars, theme = 'colorblind')
+network_sdq <- getmatrix(model2, "omega")[[1]]
+graph_sdq <- qgraph(network_sdq, layout = 'spring', labels = vars, theme = 'colorblind')
 
 #extract temperature 
-temp_smfq <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
+temp_sdq <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
 
 #extract external fields
-fields_smfq <- lapply(getmatrix(model2, 'tau'), 'mean')
+fields_sdq <- lapply(getmatrix(model2, 'tau'), 'mean')
 
 
 ### plotting
@@ -101,14 +101,14 @@ legend('center', labels,
 # a label at 3rd margin (top) at 0.1 along and right justification (2)
 mtext('(a)', 3, at = .01, padj = 2)
 
-qgraph(network_smfq, layout = 'spring', 
+qgraph(network_sdq, layout = 'spring', 
        groups = list(1:10), palette = 'colorblind',
        legend = FALSE, theme = 'colorblind',
        labels = labels, vsize = 12)
 
 par(mar = rep(2,4), cex.main = 0.8)
 
-plot(1/temp_smfq, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
+plot(1/temp_sdq, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
      ylim = c(.9, 1), 
      type = 'b', main = 'Change in network temperature')
 axis(1, c(seq(1, 3, 1)), c('11', '14', '17'))

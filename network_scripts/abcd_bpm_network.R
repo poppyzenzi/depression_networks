@@ -23,15 +23,15 @@ bpm_int <- bpm %>%
   subset(select = int_cols) %>%
   filter(if_all(all_of(symptoms), ~ . >=0 &if_all(all_of(symptoms), ~ . <=2))) %>%
   mutate(`eventname` = dplyr::recode(`eventname`,
-                              `baseline_year_1_arm_1`="0",
-                              `6_month_follow_up_arm_1`="1",
-                              `1_year_follow_up_y_arm_1`="2",
-                              `18_month_follow_up_arm_1`="3",
-                              `2_year_follow_up_y_arm_1`="4",
-                              `30_month_follow_up_arm_1`="5",
-                              `3_year_follow_up_y_arm_1`="6",
-                              `42_month_follow_up_arm_1`="7",
-                              `4_year_follow_up_y_arm_1`="8"))
+                              `baseline_year_1_arm_1`="0", # age 10 (not available for BPM)
+                              `6_month_follow_up_arm_1`="1", # 10.4
+                              `1_year_follow_up_y_arm_1`="2", # 10.9
+                              `18_month_follow_up_arm_1`="3", # 11.4
+                              `2_year_follow_up_y_arm_1`="4", # 12.0
+                              `30_month_follow_up_arm_1`="5", # 12.4
+                              `3_year_follow_up_y_arm_1`="6", # 12.9
+                              `42_month_follow_up_arm_1`="7", # 13.4
+                              `4_year_follow_up_y_arm_1`="8")) # 14.1
 
 
 ## recode scores to binary 1 true 0 not true
@@ -42,6 +42,10 @@ bpm_binary <- bpm_int %>%
   )))
 
 bpm_int <- bpm_binary
+
+setwd("/Volumes/igmm/GenScotDepression/users/poppy/abcd/symptom_data")
+write.table(bpm_int, 'abcd_bpm_sym_long.txt')
+
 
 #####################################
 ########## symptom tables ###########
@@ -57,7 +61,6 @@ frequency_table <- freq_dat %>%
   spread(time, count, fill = 0)
 
 print(frequency_table)
-setwd("/Volumes/igmm/GenScotDepression/users/poppy/abcd/symptom_data")
 write.csv(frequency_table, file="abcd_symptom_frequencies.csv")
 
 # proportion table
@@ -70,10 +73,13 @@ prop_table <- freq_dat %>%
 print(prop_table)
 write.csv(prop_table, file="abcd_symptom_proportions.csv")
 
+
 ###################################
 ## 1: Estimate network
 ###################################
 
+
+# "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
 theme = 'Reddit'
 
 # estimate network and loop over sweeps, use ggmModSelect or EBICglasso?
@@ -110,8 +116,8 @@ for (wave in names(network_list)) {
 ## plot bootstrapped network results
 for (wave in names(boot1_result_list)) {
   results <- boot1_result_list[[wave]]
-  plot(results$sample, label = labels, theme=theme)
-  title(paste("Wave =", wave), adj=1.0, line= -1.0) 
+  plot(results$sample, label = labels, theme='colorblind')
+  #title(paste("Wave =", wave), adj=1.0, line= -1.0) 
 }
 
 # plot bootstrapped edge CIs
@@ -153,7 +159,10 @@ symp_gen <- merge(bpm_qc, prs, by = 'IID')
 length(unique(symp_gen$IID)) # N=4135 with symptom and genetic data
 
 # normalise PRS to [0,1] ?
-symp_gen$PRS <- (scale(symp_gen$PRS) - min(scale(symp_gen$PRS))) / (max(scale(symp_gen$PRS)) - min(scale(symp_gen$PRS)))
+#symp_gen$PRS <- (scale(symp_gen$PRS) - min(scale(symp_gen$PRS))) / (max(scale(symp_gen$PRS)) - min(scale(symp_gen$PRS)))
+
+symp_gen$PRS <- scale(symp_gen$PRS, center = 0, scale = 1)
+symp_gen$PRS <- 2 * (symp_gen$PRS - min(symp_gen$PRS)) / (max(symp_gen$PRS) - min(symp_gen$PRS)) - 1
 
 ## mixed graphical model for mixed data types
 prs_network_list <- list()

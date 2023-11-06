@@ -7,13 +7,10 @@ library(bootnet)
 library(psychonetrics)
 library(gridExtra)
 
-# load symptom data
-# from Rscript: alspac_smfq_QC.R
+## load symptom data (from Rscript: alspac_smfq_QC.R)
 
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
 smfq_dat <- read.table('smfq_sypmtoms_wide.txt', check.names = FALSE)
-
-# SMFQ: 1 = true, 2 = sometimes, 3 = not
 
 # check right order
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
@@ -26,6 +23,7 @@ labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
 smfq_symptoms <- smfq_dat %>%
   filter(if_all(.cols = all_of(names(reshaped)[3:ncol(smfq_symptoms)]), ~ . >= 0 & . <= 3))
 
+## SMFQ: 1 = true, 2 = sometimes, 3 = not
 ## recode scores to binary 1 true 0 not true
 smfq_binary <- smfq_symptoms %>%
   mutate(across(3:15, ~case_when(
@@ -40,6 +38,47 @@ smfq_symptoms <- smfq_binary
 # make time col numeric
 mapping <- c("t1" = 1, "t2" = 2, "t3" = 3, "t4" = 4)
 smfq_symptoms$time <- mapping[smfq_symptoms$time]
+
+# save
+write.table(smfq_symptoms, file='smfq_symptoms_qcd.txt')
+
+######### ### add environ predictor vars ############ 
+# read in environmental vars
+predictors <- read.table('alspac_envi_vars')
+
+# merge with symptom data by id 
+smfq_env <- merge(smfq_symptoms, predictors, by='id')
+
+smfq_env <- smfq_env %>% rename(sex = kz021,
+                                mother_dep = r2021,
+                                bullying = f8fp470,
+                                self_esteem = f8se126,
+                                child_trauma = AT5_n,
+                                sleep = FJCI250,
+                                income = h470,
+                                month_income = V1300
+                                )
+
+env_labels = list(names(smfq_env[,16:ncol(smfq_env)]))
+## mixed graphical model for mixed data types PRS 
+env_network_list <- list()
+
+for (wave in c(1,3,4)) {
+  timepoint <- smfq_env$time == wave
+  data_subset <- smfq_env[timepoint, 3:ncol(smfq_env)]
+  env_network <- estimateNetwork(smfq_env[,3:ncol(smfq_env)], default="EBICglasso")
+  env_network_list[[as.character(wave)]] <- env_network
+}
+
+# Loop through the results and generate plot for estimated networks
+for (wave in names(env_network_list)) {
+  results <- env_network_list[[wave]]
+  qgraph(results$graph, layout='spring', theme='colorblind',
+         labels=c(unlist(labels),c(unlist(env_labels)), 
+                  title(paste("Wave =", wave), adj=0.8)))
+  }
+
+
 
 #####################################
 ########## symptom tables ###########
@@ -88,7 +127,7 @@ for (wave in names(network_list)) {
   results <- network_list[[wave]]
   qgraph(results$graph, layout='spring', theme=theme, labels = labels)
   #centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
-  title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
+  #title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
 }
 
 ######################################
@@ -151,13 +190,15 @@ smfq_qc <- smfq_symptoms %>% mutate(id = gsub("_", "", id)) %>% rename('IID'='id
 symp_gen <- merge(smfq_qc, prs, by = 'IID')
 length(unique(symp_gen$IID)) # N=6096 with symptom and genetic data
 
-# normalise PRS to [0,1] ?
-#symp_gen$PRS <- (scale(symp_gen$PRS) - min(scale(symp_gen$PRS))) / (max(scale(symp_gen$PRS)) - min(scale(symp_gen$PRS)))
+# normalise PRS to mean of 0 and SD of 1 
+symp_gen$PRS <- scale(symp_gen$PRS, center = TRUE, scale = TRUE)
 
-## mixed graphical model for mixed data types
+
+
+## mixed graphical model for mixed data types PRS 
 prs_network_list <- list()
 
-for (wave in c(1,2,3,4)) {
+for (wave in c(1,3,4)) {
   timepoint <- symp_gen$time == wave
   data_subset <- symp_gen[timepoint, 3:ncol(symp_gen)]
   prs_network <- estimateNetwork(symp_gen[,3:ncol(symp_gen)], default="EBICglasso")
@@ -167,10 +208,12 @@ for (wave in c(1,2,3,4)) {
 # Loop through the results and generate plot for estimated networks
 for (wave in names(prs_network_list)) {
   results <- prs_network_list[[wave]]
-  qgraph(results$graph, layout='spring', theme=theme, labels=c(unlist(labels),"PRS"))
+  qgraph(results$graph, layout='spring', theme='colorblind', labels=c(unlist(labels),"PRS"))
   title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
 }
 
 # running no waves
 prs_network <- estimateNetwork(symp_gen[,3:ncol(symp_gen)], default="EBICglasso")
 qgraph(prs_network$graph, layout='spring', theme='colorblind', labels=c(unlist(labels),"PRS"))
+
+#####################################
