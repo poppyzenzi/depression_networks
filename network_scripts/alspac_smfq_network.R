@@ -6,6 +6,7 @@ library(data.table)
 library(bootnet)
 library(psychonetrics)
 library(gridExtra)
+library(qgraph)
 
 ## load symptom data (from Rscript: alspac_smfq_QC.R)
 
@@ -63,6 +64,9 @@ env_labels = list(names(smfq_env[,16:ncol(smfq_env)]))
 ## mixed graphical model for mixed data types PRS 
 env_network_list <- list()
 
+palette <- 'colorblind'
+# rainbow","colorblind", "pastel","gray","R","ggplot2"
+
 for (wave in c(1,3,4)) {
   timepoint <- smfq_env$time == wave
   data_subset <- smfq_env[timepoint, 3:ncol(smfq_env)]
@@ -73,12 +77,10 @@ for (wave in c(1,3,4)) {
 # Loop through the results and generate plot for estimated networks
 for (wave in names(env_network_list)) {
   results <- env_network_list[[wave]]
-  qgraph(results$graph, layout='spring', theme='colorblind',
+  qgraph(results$graph, layout='spring', theme='colorblind', groups=list(1:13,14:21),
          labels=c(unlist(labels),c(unlist(env_labels)), 
                   title(paste("Wave =", wave), adj=0.8)))
   }
-
-
 
 #####################################
 ########## symptom tables ###########
@@ -193,8 +195,7 @@ length(unique(symp_gen$IID)) # N=6096 with symptom and genetic data
 # normalise PRS to mean of 0 and SD of 1 
 symp_gen$PRS <- scale(symp_gen$PRS, center = TRUE, scale = TRUE)
 
-
-
+symp_gen <- merge(symp_gen, smfq_env, by = 'id')
 ## mixed graphical model for mixed data types PRS 
 prs_network_list <- list()
 
@@ -217,3 +218,30 @@ prs_network <- estimateNetwork(symp_gen[,3:ncol(symp_gen)], default="EBICglasso"
 qgraph(prs_network$graph, layout='spring', theme='colorblind', labels=c(unlist(labels),"PRS"))
 
 #####################################
+
+
+##### testing with environmental and genetic data
+# fix ID variable 
+smfq_env_qc <- smfq_env %>% mutate(id = gsub("_", "", id)) %>% rename('IID'='id')
+# merge symptom and genetic data with PRS 
+all_vars <- merge(smfq_env_qc, prs, by='IID')
+# scale PRS 
+all_vars$PRS <- scale(all_vars$PRS, center = TRUE, scale = TRUE)
+
+all_network_list <- list()
+
+for (wave in c(1,3,4)) {
+  timepoint <- all_vars$time == wave
+  data_subset <- all_vars[timepoint, 3:ncol(all_vars)]
+  all_network <- estimateNetwork(all_vars[,3:ncol(all_vars)], default="EBICglasso")
+  all_network_list[[as.character(wave)]] <- all_network
+}
+
+# Loop through the results and generate plot for estimated networks
+for (wave in names(all_network_list)) {
+  results <- all_network_list[[wave]]
+  qgraph(results$graph, layout='spring', theme='colorblind', labels=c(unlist(labels), unlist(env_labels), "PRS"))
+  title(paste("Wave =", wave), adj=0.8) 
+}
+
+
