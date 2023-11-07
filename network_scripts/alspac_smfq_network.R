@@ -1,3 +1,5 @@
+### Rscript for making symptom and risk factor networks in ALPSAC
+
 library(haven)
 library(tidyr)
 library(dplyr)
@@ -13,10 +15,11 @@ library(qgraph)
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
 smfq_dat <- read.table('smfq_sypmtoms_wide.txt', check.names = FALSE)
 
-# check right order
+# check right order of symptom labels
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
             "tearful", "distracted", "self-loathing", "guilty", "isolated", 
             "unloved", "inadequate", "incompetent")
+
 
 ############# quality control ###############
 
@@ -43,46 +46,7 @@ smfq_symptoms$time <- mapping[smfq_symptoms$time]
 # save
 write.table(smfq_symptoms, file='smfq_symptoms_qcd.txt')
 
-######### ### add environ predictor vars ############ 
-# read in environmental vars
-predictors <- read.table('alspac_envi_vars')
 
-# merge with symptom data by id 
-smfq_env <- merge(smfq_symptoms, predictors, by='id')
-
-smfq_env <- smfq_env %>% rename(sex = kz021,
-                                mother_dep = r2021,
-                                bullying = f8fp470,
-                                self_esteem = f8se126,
-                                child_trauma = AT5_n,
-                                sleep = FJCI250,
-                                income = h470,
-                                month_income = V1300
-                                )
-
-env_labels = list(names(smfq_env[,16:ncol(smfq_env)]))
-## mixed graphical model for mixed data types PRS 
-env_network_list <- list()
-
-palette <- 'colorblind'
-# rainbow","colorblind", "pastel","gray","R","ggplot2"
-
-for (wave in c(1,3,4)) {
-  timepoint <- smfq_env$time == wave
-  data_subset <- smfq_env[timepoint, 3:ncol(smfq_env)]
-  env_network <- estimateNetwork(smfq_env[,3:ncol(smfq_env)], default="EBICglasso")
-  env_network_list[[as.character(wave)]] <- env_network
-}
-
-# Loop through the results and generate plot for estimated networks
-for (wave in names(env_network_list)) {
-  results <- env_network_list[[wave]]
-  qgraph(results$graph, layout='spring', theme='colorblind', groups=list(1:13,14:21),
-         labels=c(unlist(labels),c(unlist(env_labels)), 
-                  title(paste("Wave =", wave), adj=0.8)))
-  }
-
-#####################################
 ########## symptom tables ###########
 
 # frequency table
@@ -109,7 +73,7 @@ print(prop_table)
 write.csv(prop_table, file="alspac_symptom_proportions.csv")
 
 ###################################
-## 1: Estimate network
+## 1: Estimate symptom only network
 ###################################
 
 theme = 'Reddit'
@@ -117,7 +81,7 @@ theme = 'Reddit'
 # estimate network and loop over sweeps, use ggmModSelect or EBICglasso?
 network_list <- list()
 
-for (wave in c(1,2,3,4)) {
+for (wave in c(1,3,4)) {
   timepoint <- smfq_symptoms$time == wave
   data_subset <- smfq_symptoms[timepoint, 3:ncol(smfq_symptoms)]
   network <- estimateNetwork(data_subset,default="ggmModSelect")
@@ -128,8 +92,8 @@ for (wave in c(1,2,3,4)) {
 for (wave in names(network_list)) {
   results <- network_list[[wave]]
   qgraph(results$graph, layout='spring', theme=theme, labels = labels)
-  #centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
-  #title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
+  title(paste("Wave =", wave), adj=0.8, line=-1)
+  centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
 }
 
 ######################################
@@ -156,7 +120,7 @@ for (wave in names(boot1_result_list)) {
 # Create a list of plots and arrange in 1xn grid
 plot_list <- lapply(boot1_result_list, function(boot_result) {
   plot(boot_result, labels = FALSE, order = "sample")})
-grid.arrange(grobs = plot_list, ncol = 4)
+grid.arrange(grobs = plot_list, ncol = length(boot1_result_list))
 
 
 # bootstrapped difference tests between non-zero edge-weights
@@ -165,83 +129,88 @@ grid.arrange(grobs = plot_list, ncol = 4)
 # Create a list of edge difference plots and arrange in 1xn grid
 edge_plot_list <- lapply(boot1_result_list, function(boot_result) {
   plot(boot_result, "edge", plot = "difference", onlyNonZero = TRUE, order = "sample", labels=FALSE)})
-grid.arrange(grobs = edge_plot_list, ncol = 4)
+grid.arrange(grobs = edge_plot_list, ncol = length(boot1_result_list))
 
 ## Plot significant differences (alpha=0.05) of nodestrength
 # grey = non sig, black = sig, white = value of node strength 
 # Create a list of strength difference plots and arrange in 1xn grid
 strength_plot_list <- lapply(boot1_result_list, function(boot_result) {
   plot(boot_result, "strength", plot = "difference", order = "sample")})
-grid.arrange(grobs = strength_plot_list, ncol = 4)
+grid.arrange(grobs = strength_plot_list, ncol = length(boot1_result_list))
 
 # test for difference in strength between two nodes
 s1 = "01"
 s2 = "10"
 differenceTest(boot1, s1, s2, "strength")
 
-##################################################
+
+################# environmental data ###################
+
+# read in environmental vars
+predictors <- read.table('alspac_envi_vars')
+
+# merge with symptom data by id 
+smfq_env <- merge(smfq_symptoms, predictors, by='id')
+
+smfq_env <- smfq_env %>% rename(`sex` = kz021,
+                                `maternal depression` = r2021,
+                                `bullying` = f8fp470,
+                                `child trauma` = AT5_n,
+                                `sleep` = FJCI250,
+                                `income` = h470,
+)
+
+env_labels = list(names(smfq_env[,16:ncol(smfq_env)]))
+
 ################# genetic data ###################
-##################################################
 
 setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/prs/prs_alspac_OUT')
 prs <- read.table('alspac_mdd_prs_0320.best', header = TRUE)
 prs <- prs[,c(2,4)]
 
+prs <- prs %>% rename(`MDD` = `PRS`)
+                                
 # make IDs the same in the symptom data and merge
-smfq_qc <- smfq_symptoms %>% mutate(id = gsub("_", "", id)) %>% rename('IID'='id')
+smfq_qc <- smfq_env %>% mutate(id = gsub("_", "", id)) %>% rename('IID'='id')
 symp_gen <- merge(smfq_qc, prs, by = 'IID')
 length(unique(symp_gen$IID)) # N=6096 with symptom and genetic data
 
 # normalise PRS to mean of 0 and SD of 1 
-symp_gen$PRS <- scale(symp_gen$PRS, center = TRUE, scale = TRUE)
+symp_gen$MDD <- scale(symp_gen$MDD, center = TRUE, scale = TRUE)
 
-symp_gen <- merge(symp_gen, smfq_env, by = 'id')
-## mixed graphical model for mixed data types PRS 
-prs_network_list <- list()
-
-for (wave in c(1,3,4)) {
-  timepoint <- symp_gen$time == wave
-  data_subset <- symp_gen[timepoint, 3:ncol(symp_gen)]
-  prs_network <- estimateNetwork(symp_gen[,3:ncol(symp_gen)], default="EBICglasso")
-  prs_network_list[[as.character(wave)]] <- prs_network
-}
-
-# Loop through the results and generate plot for estimated networks
-for (wave in names(prs_network_list)) {
-  results <- prs_network_list[[wave]]
-  qgraph(results$graph, layout='spring', theme='colorblind', labels=c(unlist(labels),"PRS"))
-  title(paste("Wave =", wave), adj=0.8)  # line = -0.1 to lower
-}
-
-# running no waves
-prs_network <- estimateNetwork(symp_gen[,3:ncol(symp_gen)], default="EBICglasso")
-qgraph(prs_network$graph, layout='spring', theme='colorblind', labels=c(unlist(labels),"PRS"))
-
-#####################################
-
-
-##### testing with environmental and genetic data
-# fix ID variable 
-smfq_env_qc <- smfq_env %>% mutate(id = gsub("_", "", id)) %>% rename('IID'='id')
-# merge symptom and genetic data with PRS 
-all_vars <- merge(smfq_env_qc, prs, by='IID')
-# scale PRS 
-all_vars$PRS <- scale(all_vars$PRS, center = TRUE, scale = TRUE)
+######################################################################
+###### run mixed graphical model network for mixed data types ########
+###################################################################### 
 
 all_network_list <- list()
 
 for (wave in c(1,3,4)) {
-  timepoint <- all_vars$time == wave
-  data_subset <- all_vars[timepoint, 3:ncol(all_vars)]
-  all_network <- estimateNetwork(all_vars[,3:ncol(all_vars)], default="EBICglasso")
+  timepoint <- symp_gen$time == wave
+  data_subset <- symp_gen[timepoint, 3:ncol(symp_gen)]
+  all_network <- estimateNetwork(data_subset, default="EBICglasso")
   all_network_list[[as.character(wave)]] <- all_network
 }
+
+# network colours: can be "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
+theme <- 'colorblind'
+# node colours: can be "rainbow","colorblind", "pastel","gray","R","ggplot2"
+palette <- 'pastel'
+
+groups=list(1:13,14:19,20)
+group_names <- c("SMFQ symptoms", "Environmental factors", "Polygenic Risk Scores")
+names(groups) <- group_names
 
 # Loop through the results and generate plot for estimated networks
 for (wave in names(all_network_list)) {
   results <- all_network_list[[wave]]
-  qgraph(results$graph, layout='spring', theme='colorblind', labels=c(unlist(labels), unlist(env_labels), "PRS"))
-  title(paste("Wave =", wave), adj=0.8) 
+  qgraph(results$graph, layout='spring', theme=theme, groups=groups,
+         palette = palette, nodeNames=c(unlist(labels),c(unlist(env_labels),'PRS')),
+         legend=TRUE, legend.mode='style1', legend.cex=0.45)
+  title(paste("Wave =", wave), adj=0.1, line=-1.5)
+                                      
 }
 
+
+
+#####################################
 
