@@ -11,17 +11,22 @@ library (qgraph)
 #Data
 
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
-smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
+#smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
+
+# all variables
+smfq_qcd <- read.table('network_all_vars.txt', check.names = FALSE)
 
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
             "tearful", "distracted", "self-loathing", "guilty", "isolated", 
-            "unloved", "inadequate", "incompetent")
+            "unloved", "inadequate", "incompetent", "sex",
+            "maternal depression","bullying", "child trauma", "sleep", "income", "MDDPRS")
+
 
 colnames(smfq_qcd) <- c('id', 'time', unlist(labels))
 
 #recode variables so that each variable is binary with +1 and -1 
 smfq_qcd <- smfq_qcd %>%
-  mutate(across(3:15, ~case_when(
+  mutate(across(3:19, ~case_when(
     . == 1 ~ 1,
     . == 0 ~ -1,
     TRUE ~ .
@@ -42,7 +47,7 @@ smfq_qcd <- filtered
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(smfq_qcd)[3:15]
+vars <- names(smfq_qcd)[3:19]
 
 # Form saturated model and run [all params free]
 model1 <- Ising(smfq_qcd, vars = vars, groups = "time")

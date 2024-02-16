@@ -1,5 +1,4 @@
 ### Rscript for making symptom and risk factor networks in ALPSAC
-
 library(haven)
 library(tidyr)
 library(dplyr)
@@ -9,11 +8,13 @@ library(bootnet)
 library(psychonetrics)
 library(gridExtra)
 library(qgraph)
+library(viridis)
+library(mgm)
 
 ## load symptom data (from Rscript: alspac_smfq_QC.R)
 
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
-smfq_dat <- read.table('smfq_symptoms_wide.txt', check.names = FALSE)
+smfq_dat <- read.table('smfq_sypmtoms_wide.txt', check.names = FALSE)
 
 # check right order of symptom labels
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
@@ -37,7 +38,16 @@ smfq_binary <- smfq_symptoms %>%
     TRUE ~ .
   )))
 
-smfq_symptoms <- smfq_binary
+## or keep trichotomous
+smfq_tri <- smfq_symptoms %>%
+  mutate(across(3:15, ~case_when(
+    . == 1 ~ 2,
+    . == 2 ~ 1,
+    . == 3 ~ 0,
+    TRUE ~ .
+  )))
+
+smfq_symptoms <- smfq_tri
 
 # make time col numeric
 mapping <- c("t1" = 1, "t2" = 2, "t3" = 3, "t4" = 4)
@@ -45,103 +55,6 @@ smfq_symptoms$time <- mapping[smfq_symptoms$time]
 
 # save
 write.table(smfq_symptoms, file='smfq_symptoms_qcd.txt')
-
-
-########## symptom tables ###########
-
-# frequency table
-freq_dat <- smfq_symptoms
-colnames(freq_dat) <- c("id","time", unlist(labels))
-
-frequency_table <- freq_dat %>%
-  gather(symptom, value, `unhappy`:`incompetent`) %>% # gather symptoms into key value pairs 
-  group_by(time, symptom) %>% # group by time/sweep
-  summarize(count = sum(value)) %>%
-  spread(time, count, fill = 0)
-
-print(frequency_table)
-write.csv(frequency_table, file="alspac_symptom_frequencies.csv")
-
-# proportion/endorsement table
-prop_table <- freq_dat %>%
-  gather(symptom, value, `unhappy`:`incompetent`) %>% 
-  group_by(time, symptom) %>% # group by time/sweep
-  summarize(proportion = sum(value == 1) / n()) %>% # calculate proportion of "yes" responses
-  spread(time, proportion, fill = 0)
-
-print(prop_table)
-write.csv(prop_table, file="alspac_symptom_proportions.csv")
-
-###################################
-## 1: Estimate symptom only network
-###################################
-
-theme = 'Reddit'
-
-# estimate network and loop over sweeps, use ggmModSelect or EBICglasso?
-network_list <- list()
-
-for (wave in c(1,3,4)) {
-  timepoint <- smfq_symptoms$time == wave
-  data_subset <- smfq_symptoms[timepoint, 3:ncol(smfq_symptoms)]
-  network <- estimateNetwork(data_subset,default="ggmModSelect")
-  network_list[[as.character(wave)]] <- network
-}
-
-# Loop through the results and generate plot for estimated networks
-for (wave in names(network_list)) {
-  results <- network_list[[wave]]
-  qgraph(results$graph, layout='spring', theme=theme, labels = labels)
-  title(paste("Wave =", wave), adj=0.8, line=-1)
-  centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
-}
-
-######################################
-## 2: Run bootnet resampled network
-#######################################
-
-boot1_result_list <- list()
-
-## for each wave run bootnet and store results in list 
-for (wave in names(network_list)) {
-  results <- network_list[[wave]]
-  boot1<-bootnet(results, nBoots=100, default="ggmModSelect", nCores=1)
-  boot1_result_list[[as.character(wave)]] <- boot1
-}
-
-## plot bootstrapped network results
-for (wave in names(boot1_result_list)) {
-  results <- boot1_result_list[[wave]]
-  plot(results$sample, label = labels, theme=theme)
-  title(paste("Wave =", wave), adj=0.8, line=-1.0)
-}
-
-# plot bootstrapped edge CIs
-# Create a list of plots and arrange in 1xn grid
-plot_list <- lapply(boot1_result_list, function(boot_result) {
-  plot(boot_result, labels = FALSE, order = "sample")})
-grid.arrange(grobs = plot_list, ncol = length(boot1_result_list))
-
-
-# bootstrapped difference tests between non-zero edge-weights
-# grey = non sig diff, black = sig diff, coloured = colour of edge
-## plot significant differences (alpha=0.05) of edges: 
-# Create a list of edge difference plots and arrange in 1xn grid
-edge_plot_list <- lapply(boot1_result_list, function(boot_result) {
-  plot(boot_result, "edge", plot = "difference", onlyNonZero = TRUE, order = "sample", labels=FALSE)})
-grid.arrange(grobs = edge_plot_list, ncol = length(boot1_result_list))
-
-## Plot significant differences (alpha=0.05) of nodestrength
-# grey = non sig, black = sig, white = value of node strength 
-# Create a list of strength difference plots and arrange in 1xn grid
-strength_plot_list <- lapply(boot1_result_list, function(boot_result) {
-  plot(boot_result, "strength", plot = "difference", order = "sample")})
-grid.arrange(grobs = strength_plot_list, ncol = length(boot1_result_list))
-
-# test for difference in strength between two nodes
-s1 = "01"
-s2 = "10"
-differenceTest(boot1, s1, s2, "strength")
 
 ################### ################### ################
 ################# environmental data ###################
@@ -165,13 +78,12 @@ env_labels = list(names(smfq_env[,16:ncol(smfq_env)]))
 
 ################# genetic data ###################
 
-setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/prs/prs_alspac_OUT/all_thresholds')
-prs <- read.table('alspac_high_prs_0817.t2.best',header = TRUE)
-  
+setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/prs/prs_alspac_OUT')
+prs <- read.table('alspac_mdd_prs_0320.best', header = TRUE)
 prs <- prs[,c(2,4)]
 
-prs <- prs %>% rename(`p-factor` = `PRS`)
-                                
+prs <- prs %>% rename(`MDD` = `PRS`)
+
 # make IDs the same in the symptom data and merge
 smfq_qc <- smfq_env %>% mutate(id = gsub("_", "", id)) %>% rename('IID'='id')
 symp_gen <- merge(smfq_qc, prs, by = 'IID')
@@ -200,6 +112,8 @@ alspac_ids <- alspac_ids[, c('IID', 'SubjectNumeric')]
 # Merge the 'df' and 'alspac_4k' data frames on the 'SubjectNumeric' column
 class_data <- merge(alspac_ids, alspac_4k, by ="SubjectNumeric")
 class_data <- class_data[, c('IID', 'class')]
+# drop duplicate rows as 4 per IID
+class_data <- unique(class_data)
 
 # finally, merge class data with network dataframe
 symp_gen_class <- merge(symp_gen, class_data, by='IID')
@@ -216,54 +130,110 @@ symp_gen_class <- symp_gen_class %>%
     TRUE ~ as.character(class)  # Keep other values as is
   ))
 
-######################################################################
-###### run mixed graphical model network for mixed data types ########
-###################################################################### 
+colnames(symp_gen_class) <- c('IID', 'time', 'class', 1:20)
 
-all_network_list <- list()
+complete_rows <- complete.cases(symp_gen_class[, 4:16])
+symp_gen_class_complete <- symp_gen_class[complete_rows, ]
 
-# first estimate the network using
-for (wave in c(1,2,3,4)) {
-  timepoint <- symp_gen$time == wave
-  data_subset <- symp_gen[timepoint, 3:ncol(symp_gen)]
-  all_network <- estimateNetwork(data_subset, default="EBICglasso")
-  all_network_list[[as.character(wave)]] <- all_network
-}
+symp_gen_class_complete_filtered <- symp_gen_class_complete %>%
+  group_by(IID) %>%
+  filter(all(c('1', '2', '3', '4') %in% time)) %>%
+  ungroup()
 
-class_values <- c("Decreasing", "Stable low", "Persistent", "Increasing")
+symp_gen_complete <- symp_gen %>%
+  group_by(IID) %>%
+  filter(all(c('1', '2', '3', '4') %in% time)) %>%
+  ungroup()
 
-for (wave in c(1, 2, 3, 4)) {
-  for (class_value in class_values) {
-    timepoint <- symp_gen_class$time == wave
-    class_condition <- symp_gen_class$class == class_value
-    data_subset <- symp_gen_class[timepoint & class_condition, 4:ncol(symp_gen_class)]
-    all_network <- estimateNetwork(data_subset, default = "EBICglasso")
-    all_network_list[[paste0("Wave", wave, "_Class", class_value)]] <- all_network
-  }
-}
+##########################################################################
+## bootnet::estimateNetwork with mixed data types using graphical lasso ##
+########################################################################## 
 
 # network colours: can be "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
 theme <- 'colorblind'
 # node colours: can be "rainbow","colorblind", "pastel","gray","R","ggplot2"
 palette <- 'pastel'
-
+# group quality control 
 groups=list(1:13,14:19,20)
 group_names <- c("SMFQ symptoms", "Environmental factors", "Genetic factors")
 names(groups) <- group_names
 
+all_network_list <- list()
+
+# first estimate the network using bootnet::estimateNetwork
+set.seed(2714658)
+for (wave in c(1,2,3,4)) {
+  timepoint <- symp_gen_complete$time == wave
+  data_subset <- symp_gen_complete[timepoint, 3:ncol(symp_gen_complete)]
+  all_network <- estimateNetwork(data_subset, default="mgm",
+                                 type = c(rep('c', 19), 'g'), # c = cat, g = gaussian [check with hist()]
+                                 level = c(rep(3, 13), rep(2, 4), rep(5, 2), 1)) # levels, 1 for continuous
+  all_network_list[[as.character(wave)]] <- all_network
+}
+
+# stratify networks by latent class
+class_values <- c("Decreasing", "Stable low", "Persistent", "Increasing")
+for (wave in c(1, 2, 3, 4)) {
+  for (class_value in class_values) {
+    timepoint <- symp_gen_class_complete_filtered$time == wave
+    class_condition <- symp_gen_class_complete_filtered$class == class_value
+    data_subset <- symp_gen_class_complete_filtered[timepoint & class_condition, 4:ncol(symp_gen_class_complete_filtered)]
+    all_network <- estimateNetwork(data_subset, default="mgm",
+                                   type = c(rep('c', 19), 'g'),
+                                   level = c(rep(3, 13), rep(2, 4), rep(5, 2), 1))
+    all_network_list[[paste0("Wave", wave, "_Class", class_value)]] <- all_network
+  }
+}
+
 # Loop through the results and generate plot for estimated networks
 for (wave in names(all_network_list)) {
   results <- all_network_list[[wave]]
-  qgraph(results$graph, layout='spring', theme=theme, groups=groups,
-         palette = palette, nodeNames=c(unlist(labels),c(unlist(env_labels),'PRS')),
-         legend=FALSE, legend.mode='style1', legend.cex=0.4)
-  title(paste(wave), adj=0.1, line=-1.5)
+  qgraph(results$graph, 
+         layout='spring', repulsion = 1, 
+         theme=theme, groups=groups, palette = palette, 
+         nodeNames=c(unlist(labels),c(unlist(env_labels), 'PRS')),
+         legend=TRUE, legend.mode='style1', legend.cex=0.4,
+        vsize = 5.0, esize = 15)
+  title(paste('Wave = ', wave), adj=0, line=-1, cex.main=1.2)
   #qgraph::centralityPlot(results, include = c("Strength","Closeness","Betweenness"), 
-                 #labels=c(unlist(labels),c(unlist(env_labels), 'PRS')),
-                 #orderBy = 'default', theme_bw = TRUE, scale = 'z-scores')
-  }
+  #labels=c(unlist(labels),c(unlist(env_labels), 'PRS')),
+  #orderBy = 'Strength', theme_bw = TRUE)
+}
 
-## 2: Run bootnet resampled network
+
+#####
+
+# Set the number of rows and columns for the plot grid
+n_rows <- ceiling(length(all_network_list) / 4)  
+n_cols <- 4  # Number of columns
+
+# Create a multi-plot layout
+par(mfrow = c(n_rows, n_cols))
+
+# Loop through the results and generate individual network plots
+for (wave in names(all_network_list)) {
+  results <- all_network_list[[wave]]
+  qgraph(results$graph, 
+         layout='spring', repulsion = 1, 
+         theme=theme, groups=groups, palette = palette, 
+         nodeNames=c(unlist(labels),c(unlist(env_labels), 'PRS')),
+         legend=FALSE, legend.mode='style1', legend.cex=0.4,
+         vsize = 5.0, esize = 15)
+  title(paste(wave), line=0, cex.main=0.8)  # Set adj to 0, line to -2, and reduce cex.main
+}
+
+# Reset the plotting layout to its default value
+par(mfrow = c(1, 1))
+
+
+
+
+#####
+
+
+##### Assessing stability: ##################
+##### 2: Run bootnet resampled network ######
+
 all_boot_result_list <- list()
 
 ## for each wave run bootnet and store results in list 
@@ -300,11 +270,51 @@ grid.arrange(grobs = edge_plot_list, nrow=2, ncol=2)
 strength_plot_list <- lapply(all_boot_result_list, function(boot_result) {
   plot(boot_result, "strength", plot = "difference", order = "sample",
        labels=TRUE, legend=TRUE
-       )})
+  )})
 grid.arrange(grobs = strength_plot_list, nrow=2, ncol=2)
 
+########################################################
+#### mgm for mixed data types using graphical lasso ####
+########################################################
 
-#####################################
+# group QC for plotting
+groups=list(1:13,14:19,20)
+group_names <- c("SMFQ symptoms", "Environmental factors", "Genetic factors")
+names(groups) <- group_names
+categorical_palette <- viridis_pal(option = "D")(8)
+group_colours <- c(categorical_palette[1],
+                   categorical_palette[4],
+                   categorical_palette[8])
 
+colnames(symp_gen)[3:15] <- labels
+data <- na.omit(symp_gen_complete[,3:ncol(symp_gen_complete)])
 
+# fit model at 4 waves
+fit_list <- list()
+for (wave in c(1,2,3,4)) {
+  timepoint <- symp_gen_complete$time == wave
+  data_subset <- na.omit(symp_gen_complete[timepoint, 3:ncol(symp_gen_complete)])
+  fit_alspac <- mgm(data = as.matrix(data_subset), 
+                 type = c(rep('c', 19), 'g'),
+                 level = c(rep(2, 17), rep(5, 2), 1),
+                 k = 2, 
+                 lambdaSel = 'EBIC', 
+                 lambdaGam = 0.25)
+  fit_list[[as.character(wave)]] <- fit_alspac
+}
 
+# grey edges = for cat vars where no sign is defined
+# edge width proportional to abs value of edge-parameter
+for (wave in names(fit_list)) {
+    results <- fit_list[[wave]]$pairwise$wadj
+    qgraph(results, 
+           layout = 'spring', repulsion = 1,
+           edge.color = fit_alspac$pairwise$edgecolor, 
+           nodeNames = names(data),
+           groups = groups,
+           legend.mode="style2", legend.cex=0.42, 
+           vsize = 3.5, esize = 15,
+           theme=theme,
+           palette = palette, legend.mode='style1')
+    title(paste("Wave = ", wave), adj=0.1, line=-1.5)
+}

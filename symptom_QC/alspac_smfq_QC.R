@@ -9,9 +9,6 @@ library(haven)
 library(dplyr)
 library(purrr)
 library(data.table)
-library(bootnet)
-library(qgraph)
-library(graphicalVAR)
 
 # set wd
 setwd("/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/networks/depression_networks")
@@ -19,6 +16,8 @@ setwd("/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Ed
 # read in alspac data and make subject variable
 alspac <- read_dta("/Volumes/cmvm/scs/groups/ALSPAC/data/B3421_Whalley_04Nov2021.dta") %>%
   unite("Subject", c(cidB3421, qlet))
+
+alspac23 <- read_dta("/Volumes/cmvm/scs/groups/ALSPAC/data/B3421/B3421_Whalley_18Oct2023.dta")
 
 # list of 13 smfq scores at time points 1-4
 mfq_t1Vars <- c("fddp110", "fddp112", "fddp113", "fddp114", "fddp115", "fddp116", "fddp118", "fddp119", "fddp121", "fddp122", "fddp123", "fddp124", 
@@ -78,6 +77,7 @@ print(reshaped)
 length(unique(reshaped$id))
 
 write.table(reshaped, "/Volumes/igmm/GenScotDepression/users/poppy/alspac/smfq_sypmtoms_wide")
+write.table(reshaped, "/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/gmm/gmm_alspac/symptom_data/smfq_symptoms_wide")
 
 'I felt miserable or unhappy 
 I didn’t enjoy anything at all 

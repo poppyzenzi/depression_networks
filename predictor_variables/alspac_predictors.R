@@ -41,4 +41,4 @@ predictors_recoded <- predictors_qcd %>%
          )
         
 
-write.table(predictors_recoded, '/Volumes/igmm/GenScotDepression/users/poppy/alspac/alspac_envi_vars')
+write.table(predictors_recoded, '/Volumes/igmm/GenScotDepression/users/poppy/alspac/alspac_envi_vars.txt')
