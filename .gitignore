@@ -4,3 +4,5 @@
 .httr-oauth
 .DS_Store
 .quarto
+/network_temperature/anes_mergedfile_1992to1997.dta
+/network_temperature/ANES 1992-1997.R
