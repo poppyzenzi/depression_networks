@@ -53,10 +53,11 @@ predictors_qcd <- predictors %>%
          demo_comb_income_v2 = ifelse(demo_comb_income_v2 >=1 & demo_comb_income_v2 <= 10, demo_comb_income_v2, NA),
   )
 
+# 1 male 2 female --> recode to: 0 male 1 female
   
 predictors_recoded <- predictors_qcd %>%
   mutate(kbi_p_c_bully = ifelse(kbi_p_c_bully == 1, 0, ifelse(kbi_p_c_bully == 2, 1, kbi_p_c_bully)),
-         demo_sex_v2 = ifelse(demo_sex_v2 == 1, 0, ifelse(demo_sex_v2 == 2, 0, demo_sex_v2))
+         demo_sex_v2 = ifelse(demo_sex_v2 == 1, 0, ifelse(demo_sex_v2 == 2, 1, demo_sex_v2))
   )
   
   

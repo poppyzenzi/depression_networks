@@ -9,6 +9,8 @@ library(bootnet)
 library(psychonetrics)
 library(gridExtra)
 library(qgraph)
+library(mice)
+library(ggmice)
 
 ## load symptom data (from Rscript: alspac_smfq_QC.R)
 
@@ -40,7 +42,7 @@ smfq_binary <- smfq_symptoms %>%
 smfq_symptoms <- smfq_binary
 
 # make time col numeric
-mapping <- c("t1" = 1, "t2" = 2, "t3" = 3, "t4" = 4)
+mapping <- c("t1" = 1, "t2" = 2, "t3" = 3, "t4" = 4, "t5" = 5, "t6" = 6, "t7" = 7)
 smfq_symptoms$time <- mapping[smfq_symptoms$time]
 
 # save
@@ -81,7 +83,7 @@ theme = 'Reddit'
 # estimate network and loop over sweeps, use ggmModSelect or EBICglasso?
 network_list <- list()
 
-for (wave in c(1,3,4)) {
+for (wave in c(1,3,5)) {
   timepoint <- smfq_symptoms$time == wave
   data_subset <- smfq_symptoms[timepoint, 3:ncol(smfq_symptoms)]
   network <- estimateNetwork(data_subset,default="ggmModSelect")
@@ -92,7 +94,7 @@ for (wave in c(1,3,4)) {
 for (wave in names(network_list)) {
   results <- network_list[[wave]]
   qgraph(results$graph, layout='spring', theme=theme, labels = labels)
-  title(paste("Wave =", wave), adj=0.8, line=-1)
+  title(paste("Wave =", wave), adj=0.8, line=-0.1)
   centralityPlot(results, include = c("Betweenness","Closeness","Strength"), labels=labels)
 }
 
@@ -105,7 +107,7 @@ boot1_result_list <- list()
 ## for each wave run bootnet and store results in list 
 for (wave in names(network_list)) {
   results <- network_list[[wave]]
-  boot1<-bootnet(results, nBoots=100, default="ggmModSelect", nCores=1)
+  boot1<-bootnet(results, nBoots=50, default="ggmModSelect", nCores=1)
   boot1_result_list[[as.character(wave)]] <- boot1
 }
 
@@ -154,9 +156,9 @@ predictors <- read.table('alspac_envi_vars.txt')
 smfq_env <- merge(smfq_symptoms, predictors, by='id')
 
 smfq_env <- smfq_env %>% rename(`sex` = kz021,
-                                `maternal depression` = r2021,
+                                `maternal_depression` = r2021,
                                 `bullying` = f8fp470,
-                                `child trauma` = AT5_n,
+                                `child_trauma` = AT5_n,
                                 `sleep` = FJCI250,
                                 `income` = h470,
 )
@@ -165,29 +167,49 @@ env_labels = list(names(smfq_env[,16:ncol(smfq_env)]))
 
 ################# genetic data ###################
 
-setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/prs/prs_alspac_OUT/all_thresholds')
-prs <- read.table('alspac_high_prs_0817.t2.best',header = TRUE)
-  
-prs <- prs[,c(2,4)]
+setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/projects/prs/prs_alspac_OUT/all_thresholds')
+#pfac_prs <- read.table('alspac_high_prs_0817.t2.best',header = TRUE)
+#pfac_prs <- pfac_prs[,c(2,4)]
+#pfac_prs <- pfac_prs %>% rename(`p-factor` = `PRS`)
 
-prs <- prs %>% rename(`p-factor` = `PRS`)
-                                
+# reading in parcel PRS data
+csvs <- c('alspac_mood_prs1221.t3.best', 'alspac_psychotic_prs1221.t3.best', 'alspac_neurodev_prs1221.t3.best')
+
+# Create an empty list to store dataframes
+prs_data_list <- list()
+
+# iterate over each file
+for (csv_file in csvs) {
+  df <- read.table(csv_file, header = TRUE)
+  df <- df[, c('IID', 'PRS')]
+  col_prefix <- strsplit(csv_file, "_")[[1]][2]  # extract the prefix of the column name from the file name
+  col_prefix2 <- toupper(col_prefix) # capitalise
+  setnames(df, c('PRS'), paste0(col_prefix2))  # rename the second column to the appropriate prefix
+  prs_data_list[[col_prefix]] <- df  # Store each PRS dataframe in the list
+}
+
+# Combine all PRS dataframes into a single dataframe based on IID column
+combined_prs_data <- Reduce(function(x, y) merge(x, y, by = 'IID', all.x = TRUE), prs_data_list)
+
 # make IDs the same in the symptom data and merge
 smfq_qc <- smfq_env %>% mutate(id = gsub("_", "", id)) %>% rename('IID'='id')
-symp_gen <- merge(smfq_qc, prs, by = 'IID')
-length(unique(symp_gen$IID)) # N=6096 with symptom and genetic data
+symp_gen <- merge(smfq_qc, combined_prs_data, by = 'IID')
+length(unique(symp_gen$IID)) # N=6096 with symptom and genetic data (t4) (t7 = 6240)
 
-# normalise PRS to mean of 0 and SD of 1 
-symp_gen$MDD <- scale(symp_gen$MDD, center = TRUE, scale = TRUE)
+# normalise PRS to mean of 0 and SD of 1
+cols_to_standardise <- names(symp_gen)[(ncol(symp_gen) - 2):ncol(symp_gen)]
+symp_gen[, cols_to_standardise] <- scale(symp_gen[, cols_to_standardise])
+# check mean and SD
+summary(symp_gen[, cols_to_standardise])
 
 # save df with all vars
 write.table(symp_gen, '/Volumes/igmm/GenScotDepression/users/poppy/alspac/network_all_vars.txt')
 
 
-##### add class data
-
+##### add class data (optional, if want to stratify by trajectory)
+'''
 # Set the working directory
-setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/gmm/gmm_alspac')
+setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/projects/gmm/gmm_alspac')
 # Read data from a text file
 alspac_4k <- read.table('mplus_data/4k_gmm_smfq_gen_only.txt', header = FALSE)
 # Rename columns
@@ -215,6 +237,29 @@ symp_gen_class <- symp_gen_class %>%
     class == 4 ~ "Increasing",
     TRUE ~ as.character(class)  # Keep other values as is
   ))
+'''
+######################################################################
+################### Impute missing data using MICE ###################
+######################################################################
+
+# four visualisations to inspect missing data
+md.pattern(symp_gen, rotate.names = TRUE)
+plot_pattern(symp_gen, square = TRUE, rotate = TRUE)
+aggr_plot <- aggr(symp_gen, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE,
+                  labels=names(symp_gen), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+#marginplot(symp_gen[c(1,2)]) 
+
+# make predictor matrix
+# we only want to impute the environmental vars for now
+predMat <- make.predictorMatrix(symp_gen)
+predMat[,c(1:16,22:24)] <- 0
+meth <- make.method(symp_gen)
+
+# impute
+imputed_df <- mice(symp_gen,m=5,maxit=50,meth=meth,seed=500, predictorMatrix=predMat)
+summary(imputed_df)
+completed_df <- complete(imputed_df,1)
+
 
 ######################################################################
 ###### run mixed graphical model network for mixed data types ########
@@ -223,23 +268,26 @@ symp_gen_class <- symp_gen_class %>%
 all_network_list <- list()
 
 # first estimate the network using
-for (wave in c(1,2,3,4)) {
-  timepoint <- symp_gen$time == wave
-  data_subset <- symp_gen[timepoint, 3:ncol(symp_gen)]
-  all_network <- estimateNetwork(data_subset, default="EBICglasso")
+for (wave in c(1,3,5)) {
+  timepoint <- completed_df$time == wave
+  data_subset <- completed_df[timepoint, 3:ncol(completed_df)]
+  all_network <- estimateNetwork(data_subset, default="mgm")
   all_network_list[[as.character(wave)]] <- all_network
 }
 
-class_values <- c("Decreasing", "Stable low", "Persistent", "Increasing")
+#class_values <- c("Decreasing", "Stable low", "Persistent", "Increasing")
 
-for (wave in c(1, 2, 3, 4)) {
-  for (class_value in class_values) {
-    timepoint <- symp_gen_class$time == wave
-    class_condition <- symp_gen_class$class == class_value
-    data_subset <- symp_gen_class[timepoint & class_condition, 4:ncol(symp_gen_class)]
-    all_network <- estimateNetwork(data_subset, default = "EBICglasso")
-    all_network_list[[paste0("Wave", wave, "_Class", class_value)]] <- all_network
-  }
+for (wave in c(1,3,5)) {
+  #for (class_value in class_values) {
+    timepoint <- completed_df$time == wave
+    #class_condition <- symp_gen_class$class == class_value
+    data_subset <- completed_df[timepoint #& class_condition
+                                  , 3:ncol(completed_df)]
+    all_network <- estimateNetwork(data_subset, default = "mgm")
+    all_network_list[[paste0("Wave", wave
+                             #, "_Class", class_value
+                             )]] <- all_network
+  #}
 }
 
 # network colours: can be "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
@@ -247,20 +295,23 @@ theme <- 'colorblind'
 # node colours: can be "rainbow","colorblind", "pastel","gray","R","ggplot2"
 palette <- 'pastel'
 
-groups=list(1:13,14:19,20)
+
+groups=list(1:13,14:19,20:22)
 group_names <- c("SMFQ symptoms", "Environmental factors", "Genetic factors")
 names(groups) <- group_names
 
 # Loop through the results and generate plot for estimated networks
 for (wave in names(all_network_list)) {
   results <- all_network_list[[wave]]
-  qgraph(results$graph, layout='spring', theme=theme, groups=groups,
-         palette = palette, nodeNames=c(unlist(labels),c(unlist(env_labels),'PRS')),
+  qgraph(results$graph, 
+         layout='spring',
+          theme=theme, groups=groups,
+         palette = palette, nodeNames=c(unlist(labels),c(unlist(env_labels),'mood','psychotic','neurodevelopmental')),
          legend=FALSE, legend.mode='style1', legend.cex=0.4)
-  title(paste(wave), adj=0.1, line=-1.5)
-  #qgraph::centralityPlot(results, include = c("Strength","Closeness","Betweenness"), 
-                 #labels=c(unlist(labels),c(unlist(env_labels), 'PRS')),
-                 #orderBy = 'default', theme_bw = TRUE, scale = 'z-scores')
+  title(paste(wave), adj=0.1, line=-0.8)
+  qgraph::centralityPlot(results, include = c("Strength","Closeness","Betweenness"), 
+              labels=c(unlist(labels),c(unlist(env_labels), 'mood','psychotic','neurodevelopmental')),
+               orderBy = 'default', theme_bw = TRUE, scale = 'z-scores')
   }
 
 ## 2: Run bootnet resampled network
@@ -269,14 +320,14 @@ all_boot_result_list <- list()
 ## for each wave run bootnet and store results in list 
 for (wave in names(all_network_list)) {
   results <- all_network_list[[wave]]
-  boot1<-bootnet(results, nBoots=20, default="EBICglasso", nCores=1)
+  boot1<-bootnet(results, nBoots=50, default="mgm", nCores=1)
   all_boot_result_list[[as.character(wave)]] <- boot1
 }
 
 ## plot bootstrapped network results
 for (wave in names(all_boot_result_list)) {
   results <- all_boot_result_list[[wave]]
-  plot(results$sample, label = c(unlist(labels),c(unlist(env_labels),'PRS')), theme=theme)
+  plot(results$sample, label = c(unlist(labels),c(unlist(env_labels),'mood','psychotic','neurodevelopmental')), theme=theme)
   title(paste("Wave =", wave), adj=0.8, line=-1.0)
 }
 
@@ -306,5 +357,29 @@ grid.arrange(grobs = strength_plot_list, nrow=2, ncol=2)
 
 #####################################
 
+## ISING MODEL NETWORK
 
+smfq_ising <- smfq_symptoms %>%
+  mutate(across(3:15, ~case_when(
+    . == 0 ~ -1,
+    TRUE ~ .
+  )))
+
+head(smfq_ising)
+
+ising_list <- list()
+
+for (wave in c(1,3,4)) {
+  timepoint <- smfq_ising$time == wave
+  data_subset <- smfq_ising[timepoint, 3:ncol(smfq_ising)]
+  network <- Ising(data_subset) %>% runmodel()
+  ising_list[[as.character(wave)]] <- network
+}
+
+for (wave in names(ising_list)) {
+  results <- ising_list[[wave]]
+  network <- getmatrix(results, "omega")
+  qgraph(network, layout='spring', theme=theme, labels=labels[3:15])
+  title(paste("Wave =", wave), adj=0.8, line=-1)
+}
 
