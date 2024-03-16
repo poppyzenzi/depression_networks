@@ -19,15 +19,17 @@ smfq_dat <- read.table('smfq_symptoms_wide.txt', check.names = FALSE)
 
 # check right order of symptom labels
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
-            "tearful", "distracted", "self-loathing", "guilty", "isolated", 
+            "tearful", "distracted", "self_loathing", "guilty", "isolated", 
             "unloved", "inadequate", "incompetent")
+
+colnames(smfq_dat) <- c('id', 'time', unlist(labels))
 
 
 ############# quality control ###############
 
 ## filter for only valid symptom scores btw 0-3
 smfq_symptoms <- smfq_dat %>%
-  filter(if_all(.cols = all_of(names(reshaped)[3:ncol(smfq_symptoms)]), ~ . >= 0 & . <= 3))
+  filter(if_all(.cols = all_of(names(smfq_dat)[3:ncol(smfq_dat)]), ~ . >= 0 & . <= 3))
 
 ## SMFQ: 1 = true, 2 = sometimes, 3 = not
 ## recode scores to binary 1 true 0 not true
@@ -242,21 +244,38 @@ symp_gen_class <- symp_gen_class %>%
 ################### Impute missing data using MICE ###################
 ######################################################################
 
-# four visualisations to inspect missing data
-md.pattern(symp_gen, rotate.names = TRUE)
-plot_pattern(symp_gen, square = TRUE, rotate = TRUE)
-aggr_plot <- aggr(symp_gen, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE,
-                  labels=names(symp_gen), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
-#marginplot(symp_gen[c(1,2)]) 
+### Prepare the df and merge with og df
+template <- expand.grid(IID = unique(symp_gen$IID), time = 1:7)
+prepped_df <- merge(template, symp_gen, by = c("IID", "time"), all.x = TRUE)
+# sort df by id and time
+prepped_df <- prepped_df %>% arrange(IID, time)
+# NA for non-time invariant columns
+prepped_df <- prepped_df %>%
+  mutate(across(unhappy:income, ~replace(., is.na(.), NA)))
+# fill PRS for time invariant columns
+prepped_df <- prepped_df %>%
+  group_by(IID) %>%
+  fill(MOOD:NEURODEV, .direction = "down") %>%
+  fill(MOOD:NEURODEV, .direction = "up")
+# reorder cols
+prepped_df <- prepped_df[, c("IID", "time", names(symp_gen)[3:ncol(symp_gen)])]
+# Check completed df
+print(prepped_df)
+
+# visualisations to inspect missing data
+md.pattern(prepped_df, rotate.names = TRUE)
+plot_pattern(prepped_df, square = TRUE, rotate = TRUE)
+aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE,
+                  labels=names(prepped_df), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
 
 # make predictor matrix
-# we only want to impute the environmental vars for now
-predMat <- make.predictorMatrix(symp_gen)
-predMat[,c(1:16,22:24)] <- 0
-meth <- make.method(symp_gen)
+# we only want to impute the symptom and environmental vars
+predMat <- make.predictorMatrix(prepped_df)
+predMat[,c(1:2,22:24)] <- 0
+meth <- make.method(prepped_df)
 
 # impute
-imputed_df <- mice(symp_gen,m=5,maxit=50,meth=meth,seed=500, predictorMatrix=predMat)
+imputed_df <- mice(prepped_df,m=5,maxit=50,meth=meth,seed=500, predictorMatrix=predMat)
 summary(imputed_df)
 completed_df <- complete(imputed_df,1)
 
@@ -268,7 +287,7 @@ completed_df <- complete(imputed_df,1)
 all_network_list <- list()
 
 # first estimate the network using
-for (wave in c(1,3,5)) {
+for (wave in c(1,3,5,7)) {
   timepoint <- completed_df$time == wave
   data_subset <- completed_df[timepoint, 3:ncol(completed_df)]
   all_network <- estimateNetwork(data_subset, default="mgm")
@@ -277,18 +296,18 @@ for (wave in c(1,3,5)) {
 
 #class_values <- c("Decreasing", "Stable low", "Persistent", "Increasing")
 
-for (wave in c(1,3,5)) {
-  #for (class_value in class_values) {
+'for (wave in c(1,3,5,7)) {
+  for (class_value in class_values) {
     timepoint <- completed_df$time == wave
-    #class_condition <- symp_gen_class$class == class_value
+    class_condition <- symp_gen_class$class == class_value
     data_subset <- completed_df[timepoint #& class_condition
                                   , 3:ncol(completed_df)]
     all_network <- estimateNetwork(data_subset, default = "mgm")
     all_network_list[[paste0("Wave", wave
-                             #, "_Class", class_value
+                             , "_Class", class_value
                              )]] <- all_network
-  #}
-}
+  }
+}'
 
 # network colours: can be "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
 theme <- 'colorblind'
@@ -382,4 +401,3 @@ for (wave in names(ising_list)) {
   qgraph(network, layout='spring', theme=theme, labels=labels[3:15])
   title(paste("Wave =", wave), adj=0.8, line=-1)
 }
-

@@ -102,17 +102,17 @@ legend('center', labels,
 mtext('(a)', 3, at = .01, padj = 2)
 
 qgraph(network_sdq, layout = 'spring', 
-       groups = list(1:10), palette = 'colorblind',
+       groups = list(1:10), palette = 'classic',
        legend = FALSE, theme = 'colorblind',
        labels = labels, vsize = 12)
 
 par(mar = rep(2,4), cex.main = 0.8)
 
 plot(1/temp_sdq, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
-     ylim = c(.9, 1), 
+     ylim = c(.85, 1), 
      type = 'b', main = 'Change in network temperature')
-axis(1, c(seq(1, 3, 1)), c('11', '14', '17'))
-axis(2, c(seq(.75, 2, .05)))
+axis(1, c(seq(1, 4, 1)), c('7', '11', '14', '17'))
+axis(2, c(seq(.8, 2, .05)))
 mtext('(b)', 3, at = .32, padj = -2)
 
 par(mar = c(6, 4, 6, 2))

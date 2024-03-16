@@ -12,6 +12,20 @@ library(tidyverse)
 library(dplyr)
 
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/mcs')
+#### age 7 ####
+# read in dat, make unique IDs
+sdq4 <- read_dta('UKDA-6411-stata/stata/stata13/mcs4_cm_derived.dta')
+sdq4$ID = paste0(sdq4$MCSID, sep = "_", sdq4$DCNUM00)
+IDunique = sdq4$ID[grep("_1", sdq4$ID)]
+# SDQ derived variables
+sdq4_selec = sdq4 %>% filter(ID %in% IDunique) %>% select(ID, DDEMOTION, DDCONDUCT, DDHYPER, DDPEER, DDPROSOC)
+# symptom level data
+sdq4_sym <- read_dta('UKDA-6411-stata/stata/stata13/mcs4_parent_cm_interview.dta')
+sdq4_sym$ID = paste0(sdq4_sym$MCSID, sep = "_", sdq4_sym$DPNUM00)
+IDunique = sdq4_sym$ID[grep("_1", sdq4_sym$ID)]
+# emotional symptoms (1) and peer relationship problems (4) = internalising problems score 
+sdq4_sym_selec = sdq4_sym %>% filter(ID %in% IDunique) %>% select(ID, DPSDHS00, DPSDMW00, DPSDUD00, DPSDNC00, DPSDFE00,
+                                                                  DPSDSP00, DPSDGF00, DPSDLC00, DPSDPB00, DPSDGB00)
 
 #### age 11 ####
 # read in dat, make unique IDs
@@ -57,36 +71,44 @@ sdq7_sym_selec = sdq7_sym %>% filter(ID %in% IDunique) %>% select(ID, GPSDHS00, 
 
 #################################################
 
-### merge 3 waves ####
+### merge 4 waves ####
 # dervied dat
-sdq_list <- list(sdq5_selec, sdq6_selec, sdq7_selec)
-sdq_3wav <- sdq_list %>% reduce(full_join, by ="ID")
-length(unique(sdq_3wav$ID)) # N=14,150
+sdq_list <- list(sdq4_selec, sdq5_selec, sdq6_selec, sdq7_selec)
+sdq_4wav <- sdq_list %>% reduce(full_join, by ="ID")
+length(unique(sdq_4wav$ID)) # N=15,384
 # symptoms dat
-sdq_sym_list <- list(sdq5_sym_selec, sdq6_sym_selec, sdq7_sym_selec)
-sdq_sym_3wav <- sdq_sym_list %>% reduce(full_join, by ="ID")
-length(unique(sdq_sym_3wav$ID)) # N=13,558
+sdq_sym_list <- list(sdq4_sym_selec, sdq5_sym_selec, sdq6_sym_selec, sdq7_sym_selec)
+sdq_sym_4wav <- sdq_sym_list %>% reduce(full_join, by ="ID")
+length(unique(sdq_sym_4wav$ID)) # N=14958
 # remove dups
-sdq_symp_3wav_unique <- unique(sdq_sym_3wav)
+sdq_symp_4wav_unique <- unique(sdq_sym_4wav)
 
 #################################################
 
 ## QC SYMPTOM SCORES
 # -1 = NA, 1 = not true, 2 = somewhat true, 3 = certainly true, 4 = blank
 # symptoms scoring -1 (NA)
-df <- sdq_symp_3wav_unique %>%
+df <- sdq_symp_4wav_unique %>%
         replace(. == -1, NA) %>%
         replace(. == 4, NA) %>%
         replace(. == 1, 0) %>%
       replace(. == 2, 1) %>%
       replace(. == 3, 1) %>%
-      replace(. == -9, NA)
-  
+      replace(. == -9, NA) %>% # refusal
+      replace(. == -8, NA) # don't know
 # rename with sweep numbers s5 s6 s7
-colnames(df) <- c("ID", "s5PSDHS00", "s5PSDMW00", "s5PSDUD00", "s5PSDNC00", "s5PSDFE00", "s5PSDSP00", "s5PSDGF00",
-                  "s5PSDLC00", "s5PSDPB00", "s5PSDGB00", "s6PSDHS00", "s6PSDMW00", "s6PSDUD00", "s6PSDNC00", "s6PSDFE00",
-                  "s6PSDSP00", "s6PSDGF00", "s6PSDLC00", "s6PSDPB00", "s6PSDGB00", "s7PSDHS00", "s7PSDMW00", "s7PSDUD00",
-                  "s7PSDNC00", "s7PSDFE00", "s7PSDSP00", "s7PSDGF00", "s7PSDLC00", "s7PSDPB00", "s7PSDGB00"
+colnames(df) <- c("ID", 
+                  "s4PSDHS00", "s4PSDMW00", "s4PSDUD00", "s4PSDNC00", "s4PSDFE00",
+                  "s4PSDSP00", "s4PSDGF00","s4PSDLC00", "s4PSDPB00","s4PSDGB00",
+                  
+                  "s5PSDHS00", "s5PSDMW00", "s5PSDUD00", "s5PSDNC00", "s5PSDFE00",
+                  "s5PSDSP00", "s5PSDGF00","s5PSDLC00", "s5PSDPB00","s5PSDGB00",
+                  
+                  "s6PSDHS00","s6PSDMW00", "s6PSDUD00", "s6PSDNC00", "s6PSDFE00",
+                  "s6PSDSP00","s6PSDGF00", "s6PSDLC00", "s6PSDPB00", "s6PSDGB00",
+                  
+                  "s7PSDHS00", "s7PSDMW00", "s7PSDUD00","s7PSDNC00", "s7PSDFE00",
+                  "s7PSDSP00", "s7PSDGF00", "s7PSDLC00", "s7PSDPB00", "s7PSDGB00"
                   )
 
 # save wide
@@ -95,7 +117,7 @@ write.table(df, 'symptom_data/mcs_sdq_sym_wide.txt')
 # make long
 df_long <- df %>%
   pivot_longer(
-    cols = starts_with("s5") | starts_with("s6") | starts_with("s7"),
+    cols = starts_with("s4") | starts_with("s5") | starts_with("s6") | starts_with("s7"),
     names_to = c("Sweep", ".value"),
     names_pattern = "s(\\d+)([A-Z]+.*)"
   )

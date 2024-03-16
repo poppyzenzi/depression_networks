@@ -111,10 +111,10 @@ qgraph(network_bpm, layout = 'spring',
 par(mar = rep(2,4), cex.main = 0.8)
 
 plot(1/temp_bpm, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
-     ylim = c(.88, 1), 
+     ylim = c(.7, 1), 
      type = 'b', main = 'Change in network temperature')
-axis(1, c(seq(1, 2, 1)), c('11', '14'))
-axis(2, c(seq(.75, 2, .05)))
+axis(1, c(seq(1, 8, 1)), c('10.5', '11','11.5','12','12.5','13','13.5','14'))
+axis(2, c(seq(.7, 2, .05)))
 mtext('(b)', 3, at = .32, padj = -2)
 
 par(mar = c(6, 4, 6, 2))

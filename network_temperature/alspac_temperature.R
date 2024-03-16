@@ -6,6 +6,8 @@ library(bootnet)
 library(psychonetrics)
 library(dplyr)
 library (qgraph)
+library(mice)
+library(ggmice)
 
 #########################
 #Data
@@ -13,28 +15,66 @@ setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
 #smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
 
 # all variables
-smfq_qcd <- read.table('network_all_vars.txt', check.names = FALSE)
+smfq_qcd <- read.table('network_all_vars.txt', check.names = FALSE) %>%
+  select(1:16,22:24)
 
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
-            "tearful", "distracted", "self-loathing", "guilty", "isolated", 
+            "tearful", "distracted", "self_loathing", "guilty", "isolated", 
             "unloved", "inadequate", "incompetent", "sex",
-            "maternal depression","bullying", "child trauma", "sleep", "income", "mood", "psychotic", "neurodev")
-
+             "mood", "psychotic", "neurodev")
 
 colnames(smfq_qcd) <- c('id', 'time', unlist(labels))
 
 #recode variables so that each variable is binary with +1 and -1 
 smfq_qcd <- smfq_qcd %>%
-  mutate(across(3:19, ~case_when(
+  mutate(across(3:15, ~case_when(
     . == 1 ~ 1,
     . == 0 ~ -1,
     TRUE ~ .
   )))
 
+########## IMPUTATION ##############
+
+# remove non symptom vars
+symptoms_only <- smfq_qcd %>% select(1:15)
+### Prepare the df and merge with og df
+template <- expand.grid(id = unique(symptoms_only$id), time = 1:7)
+prepped_df <- merge(template, symptoms_only, by = c("id", "time"), all.x = TRUE)
+# sort df by id and time
+prepped_df <- prepped_df %>% arrange(id, time)
+# NA for non-time invariant columns
+prepped_df <- prepped_df %>%
+  mutate(across(unhappy:incompetent, ~replace(., is.na(.), NA)))
+# fill PRS for time invariant columns
+#prepped_df <- prepped_df %>%
+#  group_by(id) %>%
+#  fill(mood:neurodev)
+# reorder cols
+prepped_df <- prepped_df[, c("id", "time", names(symptoms_only)[3:ncol(symptoms_only)])]
+# Check completed df
+print(prepped_df)
+
+### inspect 
+plot_pattern(prepped_df, square = TRUE, rotate = TRUE)
+aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE,
+                  labels=names(prepped_df), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+
+### make predictor matrix
+# we only want to impute the symptoms vars for now
+predMat <- make.predictorMatrix(prepped_df)
+predMat[,c(1:2)] <- 0
+meth <- make.method(prepped_df)
+
+#### impute
+imputed <- mice(prepped_df,m=5,maxit=50,meth=meth,seed=500, predictorMatrix=predMat)
+summary(imputed)
+imputed_df <- complete(imputed,1)
+
+########## options to stratify the data ###########
+
 # stratify by sex
 girls <- subset(smfq_qcd, sex==1)
 boys <- subset(smfq_qcd, sex==-1)
-
 
 # genetically straitfy by quintiles
 quintiles <- quantile(smfq_qcd$MDDPRS, probs = c(0, 0.2, 0.4, 0.6, 0.8, 1))
@@ -49,13 +89,19 @@ count
 # get mean and SD of PRS in each group 
 risk_group_types <- unique(smfq_qcd$quintile)  # Get quintiles
 
+very_high <- subset(smfq_qcd, quintile=='very high')
+very_low <- subset(smfq_qcd, quintile=='very low')
+low <- subset(smfq_qcd, quintile=='low')
+high <- subset(smfq_qcd, quintile=='high')
+med <- subset(smfq_qcd, quintile=='middle')
+high_quart <- subset(smfq_qcd, HighQuartile==1) # nunique = 1552
+
 # dataframe for summary statistics
 summary_statistics <- data.frame(Category = character(),
                                  Mean = numeric(),
                                  SD = numeric(),
                                  Count = integer(),  # Change to integer type
                                  stringsAsFactors = FALSE)
-
 # Loop through each risk group type
 for (risk_group_type in risk_group_types) {
   mean_value <- mean(smfq_qcd$MDDPRS[smfq_qcd$risk_group == risk_group_type], na.rm = TRUE)
@@ -76,7 +122,24 @@ quartiles <- quantile(smfq_qcd$MDDPRS, probs = c(0.8))  # 75th percentile (highe
 smfq_qcd$HighQuartile <- ifelse(smfq_qcd$MDDPRS >= quartiles, 1, 0)
 head(smfq_qcd)
 
-### fit psychonetrics Ising model
+######### subset complete cases only ######### 
+
+# group df by 'id' and count time points per id
+id_counts <- imputed_df %>%
+  group_by(id) %>%
+  summarise(n_time_points = n_distinct(time))
+# filter to include indiviudals with all 7 tps
+complete_ids <- id_counts %>%
+  filter(n_time_points == 7) %>%
+  pull(id)
+# subset df
+complete_df <- imputed_df %>%
+  filter(id %in% complete_ids)
+# print subsetted 
+head(complete_df)
+length(unique(complete_df$id)) # 1009
+
+######### fit psychonetrics Ising model ##########
 
 #fit an Ising model with increasing constraints representing their hypotheses to this longitudinal assessment 
 # We investigate the impact on the fit of the model of 
@@ -86,18 +149,11 @@ head(smfq_qcd)
 # Additionally, we tested whether a dense network (all nodes are connected) or 
 #  a sparse network (at least some edges are absent) fits the data best
 
-very_high <- subset(smfq_qcd, quintile=='very high')
-very_low <- subset(smfq_qcd, quintile=='very low')
-low <- subset(smfq_qcd, quintile=='low')
-high <- subset(smfq_qcd, quintile=='high')
-med <- subset(smfq_qcd, quintile=='middle')
-high_quart <- subset(smfq_qcd, HighQuartile==1) # nunique = 1552
-
 # Variables to use:
-vars <- names(smfq_qcd)[3:15]
+vars <- names(complete_df)[3:15]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(smfq_qcd, vars = vars, groups = "time")
+model1 <- Ising(complete_df, vars = vars, groups = "time")
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
@@ -133,7 +189,7 @@ comparison <- psychonetrics::compare(
 print(comparison)
 
 #extract and plot network
-network_smfq <- getmatrix(model2, "omega")[[1]]
+network_smfq <- getmatrix(model2b, "omega")[[1]]
 graph_smfq <- qgraph(network_smfq, layout = 'spring', labels = vars, theme = 'colorblind')
 
 #extract temperature 
@@ -174,7 +230,7 @@ qgraph(network_smfq, layout = 'spring',
 par(mar = rep(2,4), cex.main = 0.8)
 
 plot(1/temp_smfq, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
-     ylim = c(.75, 1.1), 
+     ylim = c(.85, 1.05), 
      type = 'b', main = 'Change in network temperature')
 axis(1, c(seq(1, 7, 1)), c('11', '13','14', '17','18','19','22'))
 axis(2, c(seq(.7, 2, .05)))
