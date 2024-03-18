@@ -125,7 +125,7 @@ head(smfq_qcd)
 ######### subset complete cases only ######### 
 
 # group df by 'id' and count time points per id
-id_counts <- imputed_df %>%
+id_counts <- prepped_df %>%
   group_by(id) %>%
   summarise(n_time_points = n_distinct(time))
 # filter to include indiviudals with all 7 tps
@@ -133,7 +133,7 @@ complete_ids <- id_counts %>%
   filter(n_time_points == 7) %>%
   pull(id)
 # subset df
-complete_df <- imputed_df %>%
+complete_df <- prepped_df %>%
   filter(id %in% complete_ids)
 # print subsetted 
 head(complete_df)
@@ -150,10 +150,13 @@ length(unique(complete_df$id)) # 1009
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(complete_df)[3:15]
+vars <- names(prepped_df)[3:15]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(complete_df, vars = vars, groups = "time")
+model1 <- Ising(prepped_df, vars = vars, groups = "time", estimator = 'ML')
+
+## here add estimator='FIML' to the Ising model for imputation
+
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
@@ -189,11 +192,11 @@ comparison <- psychonetrics::compare(
 print(comparison)
 
 #extract and plot network
-network_smfq <- getmatrix(model2b, "omega")[[1]]
+network_smfq <- getmatrix(model2, "omega")[[1]]
 graph_smfq <- qgraph(network_smfq, layout = 'spring', labels = vars, theme = 'colorblind')
 
 #extract temperature 
-temp_smfq <-  as.numeric(lapply(getmatrix(model2b, "beta"), 'mean'))
+temp_smfq <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
 
 #extract external fields
 fields_smfq <- lapply(getmatrix(model2b, 'tau'), 'mean')

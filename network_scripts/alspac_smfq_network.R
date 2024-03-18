@@ -11,6 +11,7 @@ library(gridExtra)
 library(qgraph)
 library(mice)
 library(ggmice)
+library(NetworkComparisonTest)
 
 ## load symptom data (from Rscript: alspac_smfq_QC.R)
 
@@ -73,8 +74,10 @@ prop_table <- freq_dat %>%
   summarize(proportion = sum(value == 1) / n()) %>% # calculate proportion of "yes" responses
   spread(time, proportion, fill = 0)
 
-print(prop_table)
+print(prop_table %>% selec(1,2,4,6))
+
 write.csv(prop_table, file="alspac_symptom_proportions.csv")
+write.csv(prop_table %>% select(1,2,4,6), file="alspac_symptom_proportions_3wav.csv")
 
 ###################################
 ## 1: Estimate symptom only network
@@ -245,7 +248,7 @@ symp_gen_class <- symp_gen_class %>%
 ######################################################################
 
 ### Prepare the df and merge with og df
-template <- expand.grid(IID = unique(symp_gen$IID), time = 1:7)
+template <- expand.grid(IID = unique(symp_gen$IID), time = c(1,3,5))
 prepped_df <- merge(template, symp_gen, by = c("IID", "time"), all.x = TRUE)
 # sort df by id and time
 prepped_df <- prepped_df %>% arrange(IID, time)
@@ -261,6 +264,10 @@ prepped_df <- prepped_df %>%
 prepped_df <- prepped_df[, c("IID", "time", names(symp_gen)[3:ncol(symp_gen)])]
 # Check completed df
 print(prepped_df)
+
+# remove individuals without genetic data
+complete_rows <- complete.cases(prepped_df[, 22:24])
+prepped_df <- prepped_df[complete_rows, ]
 
 # visualisations to inspect missing data
 md.pattern(prepped_df, rotate.names = TRUE)
@@ -287,7 +294,7 @@ completed_df <- complete(imputed_df,1)
 all_network_list <- list()
 
 # first estimate the network using
-for (wave in c(1,3,5,7)) {
+for (wave in c(1,3,5)) {
   timepoint <- completed_df$time == wave
   data_subset <- completed_df[timepoint, 3:ncol(completed_df)]
   all_network <- estimateNetwork(data_subset, default="mgm")
@@ -312,7 +319,7 @@ for (wave in c(1,3,5,7)) {
 # network colours: can be "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
 theme <- 'colorblind'
 # node colours: can be "rainbow","colorblind", "pastel","gray","R","ggplot2"
-palette <- 'pastel'
+palette <- 'colorblind'
 
 
 groups=list(1:13,14:19,20:22)
@@ -328,9 +335,9 @@ for (wave in names(all_network_list)) {
          palette = palette, nodeNames=c(unlist(labels),c(unlist(env_labels),'mood','psychotic','neurodevelopmental')),
          legend=FALSE, legend.mode='style1', legend.cex=0.4)
   title(paste(wave), adj=0.1, line=-0.8)
-  qgraph::centralityPlot(results, include = c("Strength","Closeness","Betweenness"), 
-              labels=c(unlist(labels),c(unlist(env_labels), 'mood','psychotic','neurodevelopmental')),
-               orderBy = 'default', theme_bw = TRUE, scale = 'z-scores')
+  #qgraph::centralityPlot(results, include = c("Strength","Closeness","Betweenness"), 
+             # labels=c(unlist(labels),c(unlist(env_labels), 'mood','psychotic','neurodevelopmental')),
+              # orderBy = 'default', theme_bw = TRUE, scale = 'z-scores')
   }
 
 ## 2: Run bootnet resampled network
@@ -376,28 +383,15 @@ grid.arrange(grobs = strength_plot_list, nrow=2, ncol=2)
 
 #####################################
 
-## ISING MODEL NETWORK
+## Network comparison test
+wave1 <- completed_df %>% filter(time == 1)
+x <- estimateNetwork(wave1[,3:24], default='mgm')
+wave3 <- completed_df %>% filter(time == 3)
+y <- estimateNetwork(wave3[,3:24], default='mgm')
+wave5 <- completed_df %>% filter(time == 5)
+z <- estimateNetwork(wave3[,3:24], default='mgm')
 
-smfq_ising <- smfq_symptoms %>%
-  mutate(across(3:15, ~case_when(
-    . == 0 ~ -1,
-    TRUE ~ .
-  )))
+NCT(x, y)
+NCT(y, z)
 
-head(smfq_ising)
-
-ising_list <- list()
-
-for (wave in c(1,3,4)) {
-  timepoint <- smfq_ising$time == wave
-  data_subset <- smfq_ising[timepoint, 3:ncol(smfq_ising)]
-  network <- Ising(data_subset) %>% runmodel()
-  ising_list[[as.character(wave)]] <- network
-}
-
-for (wave in names(ising_list)) {
-  results <- ising_list[[wave]]
-  network <- getmatrix(results, "omega")
-  qgraph(network, layout='spring', theme=theme, labels=labels[3:15])
-  title(paste("Wave =", wave), adj=0.8, line=-1)
-}
+#####################################
