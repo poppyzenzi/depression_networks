@@ -12,6 +12,7 @@ library(qgraph)
 library(mice)
 library(ggmice)
 library(NetworkComparisonTest)
+library(viridis)
 
 ## load symptom data (from Rscript: alspac_smfq_QC.R)
 
@@ -282,10 +283,10 @@ predMat[,c(1:2,22:24)] <- 0
 meth <- make.method(prepped_df)
 
 # impute
+# 20% missing, then use 20 imputed datasets
 imputed_df <- mice(prepped_df,m=5,maxit=50,meth=meth,seed=500, predictorMatrix=predMat)
 summary(imputed_df)
 completed_df <- complete(imputed_df,1)
-
 
 ######################################################################
 ###### run mixed graphical model network for mixed data types ########
@@ -333,12 +334,20 @@ for (wave in names(all_network_list)) {
          layout='spring',
           theme=theme, groups=groups,
          palette = palette, nodeNames=c(unlist(labels),c(unlist(env_labels),'mood','psychotic','neurodevelopmental')),
-         legend=FALSE, legend.mode='style1', legend.cex=0.4)
+         legend=TRUE, legend.mode='style1', legend.cex=0.4)
   title(paste(wave), adj=0.1, line=-0.8)
   #qgraph::centralityPlot(results, include = c("Strength","Closeness","Betweenness"), 
-             # labels=c(unlist(labels),c(unlist(env_labels), 'mood','psychotic','neurodevelopmental')),
-              # orderBy = 'default', theme_bw = TRUE, scale = 'z-scores')
+             #labels=c(unlist(labels),c(unlist(env_labels), 'mood','psychotic','neurodevelopmental')),
+              #orderBy = 'default', theme_bw = TRUE, scale = 'z-scores')
   }
+
+## overlay centrality plot
+centralityPlot(list(Wave1 = all_network_list[[1]], Wave3 = all_network_list[[2]], 
+                    Wave5 = all_network_list[[3]]), 
+               theme_bw=FALSE, scale = "z-scores", 
+               include = c("Strength","Closeness","Betweenness"), 
+               labels = nodeNames)
+
 
 ## 2: Run bootnet resampled network
 all_boot_result_list <- list()
@@ -369,16 +378,39 @@ grid.arrange(grobs = plot_list, ncol = length(all_boot_result_list))
 # Create a list of edge difference plots and arrange in 1xn grid
 edge_plot_list <- lapply(all_boot_result_list, function(boot_result) {
   plot(boot_result, "edge", plot = "difference", onlyNonZero = TRUE, order = "sample", labels=FALSE)})
-grid.arrange(grobs = edge_plot_list, nrow=2, ncol=2)
+grid.arrange(grobs = edge_plot_list, nrow=1, ncol=3)
 
 ## Plot significant differences (alpha=0.05) of nodestrength
 # grey = non sig, black = sig, white = value of node strength 
 # Create a list of strength difference plots and arrange in 1xn grid
 strength_plot_list <- lapply(all_boot_result_list, function(boot_result) {
   plot(boot_result, "strength", plot = "difference", order = "sample",
-       labels=TRUE, legend=TRUE
-       )})
-grid.arrange(grobs = strength_plot_list, nrow=2, ncol=2)
+       labels=TRUE, legend=TRUE)})
+grid.arrange(grobs = strength_plot_list, nrow=1, ncol=3)
+
+########################################
+########## symptom heatmaps ###########
+
+nodeNames = c(unlist(labels),c(unlist(env_labels),'mood','psychotic','neurodevelopmental'))
+
+result1 <- all_network_list[["1"]][["graph"]]
+result3 <- all_network_list[["3"]][["graph"]]
+result5 <- all_network_list[["5"]][["graph"]]
+
+results <- list(result1, result3, result5)
+
+for (i in seq_along(results)) {
+  rownames(results[[i]]) <- nodeNames
+  colnames(results[[i]]) <- nodeNames
+}
+
+for (i in seq_along(results)) {
+  heatmap(results[[i]], 
+          symm = TRUE,
+          col = viridis::plasma(100),
+          Rowv = NA,
+          main = paste("Wave", i))
+}
 
 
 #####################################

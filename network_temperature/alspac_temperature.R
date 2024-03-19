@@ -12,7 +12,7 @@ library(ggmice)
 #########################
 #Data
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
-#smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
+smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
 
 # all variables
 smfq_qcd <- read.table('network_all_vars.txt', check.names = FALSE) %>%
