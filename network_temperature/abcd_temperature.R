@@ -12,8 +12,7 @@ library (qgraph)
 
 setwd("/Volumes/igmm/GenScotDepression/users/poppy/abcd/symptom_data")
 abcd_qcd <- read.table('abcd_bpm_sym_long.txt', check.names = FALSE)
-
-labels <- c("worthless","anxious","guilty","self-conscious","unhappy","worry")
+labels <- c("worthless","anxious","guilty","self_conscious","unhappy","worry")
 
 colnames(abcd_qcd) <- c('id', 'time', unlist(labels))
 
@@ -26,8 +25,41 @@ abcd_qcd <- abcd_qcd %>%
   )))
 
 # remove second wave
-filtered <- abcd_qcd[abcd_qcd$time %in% c(2, 8), ]
-abcd_qcd <- filtered
+#filtered <- abcd_qcd[abcd_qcd$time %in% c(2, 8), ]
+#abcd_qcd <- filtered
+
+########## IMPUTATION ##############
+
+### Prepare the df and merge with og df
+template <- expand.grid(id = unique(abcd_qcd$id), time = 1:8)
+prepped_df <- merge(template, abcd_qcd, by = c("id", "time"), all.x = TRUE)
+# sort df by id and time
+prepped_df <- prepped_df %>% arrange(id, time)
+# NA for non-time invariant columns
+prepped_df <- prepped_df %>%
+  mutate(across(`worthless`:`worry`, ~replace(., is.na(.), NA)))
+# reorder cols
+prepped_df <- prepped_df[, c("id", "time", names(abcd_qcd)[3:ncol(abcd_qcd)])]
+# Check completed df
+print(prepped_df)
+
+### inspect 
+plot_pattern(prepped_df, square = TRUE, rotate = TRUE)  + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle("ABCD")
+aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE,
+                  labels=names(prepped_df), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+
+### make predictor matrix
+# we only want to impute the symptoms vars for now
+predMat <- make.predictorMatrix(prepped_df)
+predMat[,c(1:2)] <- 0
+meth <- make.method(prepped_df)
+
+#### impute
+imputed <- mice(prepped_df,m=5,maxit=50, meth=meth,seed=500, predictorMatrix=predMat)
+summary(imputed)
+imputed_df <- complete(imputed,1)
 
 ### fit psychonetrics model
 
@@ -48,7 +80,7 @@ model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
 
-# Equal networks (omega = network structure, edges btw nodes equal across time):
+# Equal networks (omega = network structure, edges btw nodes equal across time)
 model2 <- model1 %>% groupequal("omega") %>% runmodel
 # Prune-stepup to find a sparse model:
 model2b <- model2 %>% prune(alpha = 0.05) %>% stepup(mi = "mi_equal", alpha = 0.05)
@@ -87,6 +119,19 @@ temp_bpm <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
 #extract external fields
 fields_bpm <- lapply(getmatrix(model2, 'tau'), 'mean')
 
+
+rownames(network_bpm) <- labels
+colnames(network_bpm) <- labels
+
+heatmap(network_bpm, 
+        symm = TRUE,
+        col = viridis::plasma(100),
+        Rowv = NA)
+
+heatmap.2(network_bpm, 
+        symm = TRUE,
+        col = viridis::plasma(100),Rowv = NA,
+        trace = "none", density.info = "none")
 
 ### plotting
 

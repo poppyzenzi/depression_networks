@@ -12,16 +12,19 @@ library(ggmice)
 #########################
 #Data
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
+# symptoms only
 smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
-
+# adding sex
+env <- read.table('alspac_envi_vars.txt', check.names=FALSE) %>% select(1:2)
+withsex <- merge(smfq_qcd, env, by='id') %>% rename('sex'='kz021')
+length(unique(withsex$id))
+smfq_qcd <- withsex
 # all variables
-smfq_qcd <- read.table('network_all_vars.txt', check.names = FALSE) %>%
-  select(1:16,22:24)
+#smfq_qcd <- read.table('network_all_vars.txt', check.names = FALSE) %>% select(1:16,22:24)
 
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
             "tearful", "distracted", "self_loathing", "guilty", "isolated", 
-            "unloved", "inadequate", "incompetent", "sex",
-             "mood", "psychotic", "neurodev")
+            "unloved", "inadequate", "incompetent","sex")
 
 colnames(smfq_qcd) <- c('id', 'time', unlist(labels))
 
@@ -36,7 +39,7 @@ smfq_qcd <- smfq_qcd %>%
 ########## IMPUTATION ##############
 
 # remove non symptom vars
-symptoms_only <- smfq_qcd %>% select(1:15)
+symptoms_only <- smfq_qcd %>% select(1:16)
 ### Prepare the df and merge with og df
 template <- expand.grid(id = unique(symptoms_only$id), time = 1:7)
 prepped_df <- merge(template, symptoms_only, by = c("id", "time"), all.x = TRUE)
@@ -55,26 +58,28 @@ prepped_df <- prepped_df[, c("id", "time", names(symptoms_only)[3:ncol(symptoms_
 print(prepped_df)
 
 ### inspect 
-plot_pattern(prepped_df, square = TRUE, rotate = TRUE)
+plot_pattern(prepped_df, square = TRUE, rotate = TRUE) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle("ALSPAC")
 aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE,
                   labels=names(prepped_df), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
 
 ### make predictor matrix
 # we only want to impute the symptoms vars for now
 predMat <- make.predictorMatrix(prepped_df)
-predMat[,c(1:2)] <- 0
+predMat[,c(1:2,16)] <- 0
 meth <- make.method(prepped_df)
 
 #### impute
-imputed <- mice(prepped_df,m=5,maxit=50,meth=meth,seed=500, predictorMatrix=predMat)
+imputed <- mice(prepped_df,m=5,maxit=40,meth=meth,seed=500, predictorMatrix=predMat)
 summary(imputed)
 imputed_df <- complete(imputed,1)
 
 ########## options to stratify the data ###########
 
 # stratify by sex
-girls <- subset(smfq_qcd, sex==1)
-boys <- subset(smfq_qcd, sex==-1)
+girls <- subset(prepped_df, sex==1)
+boys <- subset(prepped_df, sex==0)
 
 # genetically straitfy by quintiles
 quintiles <- quantile(smfq_qcd$MDDPRS, probs = c(0, 0.2, 0.4, 0.6, 0.8, 1))
@@ -146,14 +151,14 @@ length(unique(complete_df$id)) # 1009
 # 1) constraining edges between nodes to be equal across time points
 # 2) constraining the external fields to be equal across time points 
 # 3) constraining the temperature (the entropy of the system) to be equal across time points. 
-# Additionally, we tested whether a dense network (all nodes are connected) or 
+# 4) Additionally, we tested whether a dense network (all nodes are connected) or 
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(prepped_df)[3:15]
+vars <- names(boys)[3:15]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(prepped_df, vars = vars, groups = "time", estimator = 'ML')
+model1 <- Ising(boys, vars = vars, groups = "time", estimator = 'ML')
 
 ## here add estimator='FIML' to the Ising model for imputation
 
@@ -195,12 +200,25 @@ print(comparison)
 network_smfq <- getmatrix(model2, "omega")[[1]]
 graph_smfq <- qgraph(network_smfq, layout = 'spring', labels = vars, theme = 'colorblind')
 
-#extract temperature 
+#extract temperature (mean value for each time point, can we get error, maybe in bootstrapping?)
 temp_smfq <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
 
 #extract external fields
 fields_smfq <- lapply(getmatrix(model2b, 'tau'), 'mean')
 
+rownames(network_smfq) <- labels[1:13]
+colnames(network_smfq) <- labels[1:13]
+
+heatmap(network_smfq, 
+          symm = TRUE,
+          col = viridis::plasma(100),
+          Rowv = NA,
+          main = paste("ALSPAC"))
+
+heatmap.2(network_smfq, 
+          symm = TRUE,
+          col = viridis::plasma(100),Rowv = NA,
+          trace = "none", density.info = "none")
 
 ### plotting
 
@@ -233,7 +251,7 @@ qgraph(network_smfq, layout = 'spring',
 par(mar = rep(2,4), cex.main = 0.8)
 
 plot(1/temp_smfq, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
-     ylim = c(.85, 1.05), 
+     ylim = c(.75, 1.05), 
      type = 'b', main = 'Change in network temperature')
 axis(1, c(seq(1, 7, 1)), c('11', '13','14', '17','18','19','22'))
 axis(2, c(seq(.7, 2, .05)))

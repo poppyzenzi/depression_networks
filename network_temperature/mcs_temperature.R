@@ -6,6 +6,9 @@ library(bootnet)
 library(psychonetrics)
 library(dplyr)
 library (qgraph)
+library(mice)
+library(ggmice)
+library(VIM)
 
 #########################
 #Data
@@ -27,6 +30,41 @@ mcs_qcd <- mcs_qcd %>%
   )))
 
 
+########## IMPUTATION ##############
+
+### Prepare the df and merge with og df
+template <- expand.grid(id = unique(mcs_qcd$id), time = 4:7)
+prepped_df <- merge(template, mcs_qcd, by = c("id", "time"), all.x = TRUE)
+# sort df by id and time
+prepped_df <- prepped_df %>% arrange(id, time)
+# NA for non-time invariant columns
+prepped_df <- prepped_df %>%
+  mutate(across(`malaise`:`adult-oriented`, ~replace(., is.na(.), NA)))
+# reorder cols
+prepped_df <- prepped_df[, c("id", "time", names(mcs_qcd)[3:ncol(mcs_qcd)])]
+# Check completed df
+print(prepped_df)
+
+### inspect 
+plot_pattern(prepped_df) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle("MCS")
+
+aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE,
+                  labels=names(prepped_df), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+
+### make predictor matrix
+# we only want to impute the symptoms vars for now
+predMat <- make.predictorMatrix(prepped_df)
+predMat[,c(1:2)] <- 0
+meth <- make.method(prepped_df)
+
+#### impute
+imputed <- mice(prepped_df,m=3,maxit=50,meth=meth, predictorMatrix=predMat)
+summary(imputed)
+imputed_df <- complete(imputed,1)
+
+
 ### fit psychonetrics model
 
 #fit an Ising model with increasing constraints representing their hypotheses to this longitudinal assessment 
@@ -41,7 +79,7 @@ mcs_qcd <- mcs_qcd %>%
 vars <- names(mcs_qcd)[3:12]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(mcs_qcd, vars = vars, groups = "time")
+model1 <- Ising(mcs_qcd, vars = vars, groups = "time", estimator = 'ML')
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
@@ -85,6 +123,14 @@ temp_sdq <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
 #extract external fields
 fields_sdq <- lapply(getmatrix(model2, 'tau'), 'mean')
 
+
+rownames(network_sdq) <- labels
+colnames(network_sdq) <- labels
+
+heatmap(network_sdq, 
+        symm = TRUE,
+        col = viridis::plasma(100),
+        Rowv = NA)
 
 ### plotting
 
