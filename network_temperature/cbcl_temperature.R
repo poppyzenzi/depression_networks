@@ -1,5 +1,5 @@
 #########################
-## ABCD network temp
+## ABCD network temp [CBCL version]
 #########################
 library (foreign)
 library(bootnet)
@@ -11,44 +11,63 @@ library(mice)
 library(ggmice)
 
 #########################
-# data (symptoms at t1,2,3,4,5,6,7,8)
+#Data
+
+
 setwd("/Volumes/igmm/GenScotDepression/users/poppy/abcd/symptom_data")
-abcd_qcd <- read.table('abcd_bpm_sym_long.txt', check.names = FALSE)
-labels <- c("worthless","anxious","guilty","self_conscious","unhappy","worry")
+abcd_qcd <- read.table('cbcl_symptoms_binary.txt', check.names = FALSE)
+labels <- c('anhedonia','tearful','selfharm','eating','worthlessness',
+            'guilt','fatigue','oversleeps','undersleeps','suicidalideation',
+            'sleep','lethargic','unhappy')
+
+# 0 - not true, 1 - true
+#There is very little they enjoy
+#Cries a lot
+#Deliberately harms self or attempts suicide
+#Doesnt eat well
+#Feels worthless or inferior
+#Feels too guilty
+#Overtired without good reason
+#Sleeps less than most kids
+#Sleeps more than most kids during day and/or night
+#Talks about killing self
+#Trouble sleeping
+#Underactive, slow moving, or lacks energy
+#Unhappy, sad, or depressed
 
 colnames(abcd_qcd) <- c('id', 'time', unlist(labels))
 
-# demographics
+## demographics
 demog <- read.table('/Volumes/igmm/GenScotDepression/users/poppy/abcd/abcd_envi_vars.txt')
 sexdf <- demog %>% filter(eventname==0) %>% select(src_subject_id, demo_sex_v2)
 names(sexdf) <- c('id','sex')
 abcd_qcd <- merge(abcd_qcd, sexdf, by='id', all.x=TRUE)
 
-# puberty (at t0,2,4,6,8, t0 is lost as no symptoms)
-puberty <- read.table('../predictors/puberty.vars.txt') %>% select(src_subject_id, eventname, pds_y_ss)
-names(puberty) <- c('id','time','pubertal_stage')
-abcd_qcd <- merge(abcd_qcd, puberty, by=c('id','time'), all.x=TRUE)
-
 #recode variables so that each variable is binary with +1 and -1 
 abcd_qcd <- abcd_qcd %>%
-  mutate(across(3:9, ~case_when(
+  mutate(across(3:16, ~case_when(
     . == 1 ~ 1,
     . == 0 ~ -1, # male
     TRUE ~ .
   )))
- 
+
 ########## IMPUTATION ##############
 ### Prepare the df and merge with og df
-template <- expand.grid(id = unique(abcd_qcd$id), time = 1:8)
+template <- expand.grid(id = unique(abcd_qcd$id), time = c(0,2,4,6,8)) # give everyone 5 observations
 prepped_df <- merge(template, abcd_qcd, by = c("id", "time"), all.x = TRUE)
 # sort df by id and time
 prepped_df <- prepped_df %>% arrange(id, time)
-
 # reorder cols
-prepped_df <- prepped_df[, c("id", "time", "sex", "pubertal_stage", names(abcd_qcd)[3:8])]
+prepped_df <- prepped_df[, c("id", "time", "sex", names(abcd_qcd)[3:15])]
+# Fill missing sex values by id
+prepped_df <- prepped_df %>%
+  arrange(id, time) %>%
+  group_by(id) %>%
+  fill(sex, .direction = "downup") %>%
+  ungroup()
 # NA for non-time invariant columns
 prepped_df <- prepped_df %>%
-  mutate(across(`worthless`:`worry`, ~replace(., is.na(.), NA)))
+  mutate(across(`anhedonia`:`unhappy`, ~replace(., is.na(.), NA)))
 # Check completed df
 print(prepped_df)
 
@@ -60,20 +79,19 @@ aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TR
                   labels=names(prepped_df), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
 
 ### make predictor matrix
-# we only want to impute the symptoms vars for now, not pubertal stage etc.
+# we only want to impute the symptoms vars for now
 predMat <- make.predictorMatrix(prepped_df)
-predMat[,c(1:4)] <- 0
+predMat[,c(1:3)] <- 0
 meth <- make.method(prepped_df)
-meth[c("sex", "pubertal_stage")] <- ""
 
 #### impute
-imputed <- mice(prepped_df,m=5,maxit=50, meth=meth,seed=500, predictorMatrix=predMat)
-summary(imputed)
-imputed_df <- complete(imputed,1)
+cbcl_imputed <- mice(prepped_df,m=5,maxit=50, meth=meth,seed=500, predictorMatrix=predMat)
+summary(cbcl_imputed)
+cbcl_imputed_df <- complete(cbcl_imputed,1)
 
 ### sex stratification
-boys <- imputed_df %>% filter(sex==-1)
-girls <- imputed_df %>% filter(sex==1)
+boys <- cbcl_imputed_df %>% filter(sex==-1)
+girls <- cbcl_imputed_df %>% filter(sex==1)
 
 ### fit psychonetrics model
 
@@ -86,14 +104,10 @@ girls <- imputed_df %>% filter(sex==1)
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(imputed_df)[5:10]
-# drop NA rows for puberty info
-imputed_puberty <- na.omit(imputed_df, cols = "pubertal_stage")
-boys <- imputed_puberty %>% filter(sex==-1)
-girls <- imputed_puberty %>% filter(sex==1)
+vars <- names(cbcl_imputed_df)[4:16]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(girls, vars = vars, groups = "pubertal_stage")
+model1 <- Ising(girls, vars = vars, groups = "time")
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
@@ -123,75 +137,83 @@ psychonetrics::compare(
   `8. all parameters equal (sparse)` = model4b
 ) %>% arrange(BIC) 
 
-best.model <- model3
-
 #extract and plot network
 # "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
-network_bpm <- getmatrix(best.model, "omega")[[1]]
-graph_bpm <- qgraph(network_bpm, layout = 'spring', labels = vars, theme = 'colorblind')
+network_cbcl <- getmatrix(model2, "omega")[[1]]
+graph_cbcl <- qgraph(network_cbcl, layout = 'spring', labels = vars, theme = 'colorblind')
 
 #extract temperature 
-temp_bpm <-  as.numeric(lapply(getmatrix(best.model, "beta"), 'mean'))
+temp_cbcl <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
 # calculate 95%CIs from standard errors of the beta parameter
-betas_est <- best.model@parameters$est[best.model@parameters$matrix == "beta"]
-betas_se <- best.model@parameters$se[best.model@parameters$matrix == "beta"]
+betas_est <- model2@parameters$est[model2b@parameters$matrix == "beta"]
+betas_se <- model2@parameters$se[model2b@parameters$matrix == "beta"]
 z = qnorm(0.975)
-upperCI <- temp_bpm + (z*betas_se)
-lowerCI <- temp_bpm - (z*betas_se)
+upperCI <- temp_cbcl + (z*betas_se)
+lowerCI <- temp_cbcl - (z*betas_se)
 
 #extract external fields (information)
-fields_bpm <- lapply(getmatrix(best.model, 'tau'), 'mean')
+fields_cbcl <- lapply(getmatrix(model2, 'tau'), 'mean')
 
-rownames(network_bpm) <- labels
-colnames(network_bpm) <- labels
+rownames(network_cbcl) <- labels
+colnames(network_cbcl) <- labels
 
-heatmap(network_bpm, 
+heatmap(network_cbcl, 
         symm = TRUE,
         col = viridis::plasma(100),
-        Rowv = NA, main = paste("BPM items"))
+        Rowv = NA, main = paste("CBCL items"))
 
-heatmap.2(network_bpm, 
-        symm = TRUE,
-        col = viridis::plasma(100),Rowv = NA,
-        trace = "none", density.info = "none")
+heatmap.2(network_cbcl, 
+          symm = TRUE,
+          col = viridis::plasma(100),Rowv = NA,
+          trace = "none", density.info = "none")
 
 ### plotting
 
+pdf('mcs_network_temp.pdf', 7, 5)
+layout(matrix(c(1,2,2,2,2,3,3,3,3,
+                4,4,4,4,4,5,5,5,5,5), 2, 9, byrow = TRUE))
+
+par(mar = rep(0,4))
 plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
 legend('center', labels, 
        title = 'BPM items', col = 'darkorange', pch = 19,
        cex = 0.8, bty = 'n')
 
-qgraph(network_bpm, layout = 'spring', 
+# a label at 3rd margin (top) at 0.1 along and right justification (2)
+mtext('(a)', 3, at = .01, padj = 2)
+
+qgraph(network_cbcl, layout = 'spring', 
        groups = list(1:6), palette = 'colorblind',
        legend = FALSE, theme = 'colorblind',
        labels = labels, vsize = 12)
 
+par(mar = rep(2,4), cex.main = 0.8)
+
 ## plot temperature change
-ages <- c(10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14)
-stages <- c('pre','early','mid','late','post')
+
+ages <- c(10, 11, 12, 13, 14)
 
 # plot estimates
-temp_data <- data.frame(#Age = ages,
-                        Stage = stages,
-                        Temperature = 1/temp_bpm,
+temp_data <- data.frame(Age = ages,
+                        Temperature = 1/temp_cbcl,
                         UpperCI = 1/upperCI,
                         LowerCI = 1/lowerCI)
 
-# convert stage to factor levels to plot x axis in order
-temp_data$Stage <- factor(temp_data$Stage, levels = stages)
-
 # Plot estimates and confidence intervals using ggplot2
-ggplot(temp_data, aes(x = Stage, y = Temperature)) +
+ggplot(temp_data, aes(x = Age, y = Temperature)) +
   geom_point(color = "blue", shape = 16) +
-  #geom_line() +
+  geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
-  #ylim(0.65, 1.0) +
-  labs(x = "Pubertal stage", y = "Temperature", title = "Temperature change") +
+  ylim(0.85, 1.1) +
+  labs(x = "Age", y = "Temperature", title = "Temperature change") +
   theme_classic() +
   theme(axis.text.x = element_text(size = 11),  # Adjust size of x-axis tick labels
         axis.text.y = element_text(size = 11),  # Adjust size of y-axis tick labels
-        plot.title = element_text(hjust = 0.5, size = 12))  # Center and adjust size of title
+        plot.title = element_text(hjust = 0.5, size = 12)) +  # Center and adjust size of title
+  scale_x_continuous(breaks = ages)
+
+mtext('(b)', 3, at = .32, padj = -2)
+par(mar = c(6, 4, 6, 2))
 
 # histograms of overall depression score 
 abcd_qcd$total <- rowSums(abcd_qcd[,3:8])

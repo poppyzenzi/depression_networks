@@ -1,34 +1,39 @@
-#########################
-## ALSPAC network temp
-#########################
-library (foreign)
+#################################### 
+######## ALSPAC network temp #######
+#################################### 
+library(foreign)
 library(bootnet)
 library(psychonetrics)
 library(dplyr)
 library (qgraph)
 library(mice)
 library(ggmice)
+library(gplots)
+library(VIM)
+library(boot)
+library(purrr)
+################## DATA AND QC ####################
 
-#########################
-#Data
+## read in the data, add predictor variables and labels
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
-# symptoms only
 smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
-# adding sex
-env <- read.table('alspac_envi_vars.txt', check.names=FALSE) %>% select(1:2)
-withsex <- merge(smfq_qcd, env, by='id') %>% rename('sex'='kz021')
-length(unique(withsex$id))
-smfq_qcd <- withsex
-# all variables
-#smfq_qcd <- read.table('network_all_vars.txt', check.names = FALSE) %>% select(1:16,22:24)
+env <- read.table('alspac_envi_vars.txt', check.names=FALSE)
+smfq_qcd <- merge(smfq_qcd, env, by='id')
+smfq_qcd <- smfq_qcd %>% rename(`sex` = kz021,
+                                `maternal_depression` = r2021,
+                                `bullying` = f8fp470,
+                                `child_trauma` = AT5_n,
+                                `sleep` = FJCI250,
+                                `income` = h470,
+)
 
+env_labels = list(names(smfq_qcd[,16:ncol(smfq_qcd)]))
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
             "tearful", "distracted", "self_loathing", "guilty", "isolated", 
             "unloved", "inadequate", "incompetent","sex")
+colnames(smfq_qcd) <- c('id', 'time', unlist(labels), unlist(env_labels))
 
-colnames(smfq_qcd) <- c('id', 'time', unlist(labels))
-
-#recode variables so that each variable is binary with +1 and -1 
+# recode variables so that each symptoms is binary with +1 and -1 
 smfq_qcd <- smfq_qcd %>%
   mutate(across(3:15, ~case_when(
     . == 1 ~ 1,
@@ -48,6 +53,10 @@ prepped_df <- prepped_df %>% arrange(id, time)
 # NA for non-time invariant columns
 prepped_df <- prepped_df %>%
   mutate(across(unhappy:incompetent, ~replace(., is.na(.), NA)))
+# fill sex (have checked that individuals don't have conflicitng sex)
+prepped_df <- prepped_df %>%
+  group_by(id) %>%
+  fill(sex, .direction = "down") %>% fill(sex, .direction = "up")
 # fill PRS for time invariant columns
 #prepped_df <- prepped_df %>%
 #  group_by(id) %>%
@@ -69,80 +78,20 @@ aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TR
 predMat <- make.predictorMatrix(prepped_df)
 predMat[,c(1:2,16)] <- 0
 meth <- make.method(prepped_df)
+meth[c("sex")] <- ""
 
 #### impute
-imputed <- mice(prepped_df,m=5,maxit=40,meth=meth,seed=500, predictorMatrix=predMat)
-summary(imputed)
-imputed_df <- complete(imputed,1)
+imputed_smfq <- mice(prepped_df,m=5,maxit=40,meth=meth,seed=500, predictorMatrix=predMat)
+summary(imputed_smfq)
+imputed_df_smfq_smfq <- complete(imputed_smfq,1)
+
+write.table(imputed_df_smfq_smfq, 'alspac_imputed_ising.txt', col.names=TRUE)
 
 ########## options to stratify the data ###########
 
 # stratify by sex
-girls <- subset(prepped_df, sex==1)
-boys <- subset(prepped_df, sex==0)
-
-# genetically straitfy by quintiles
-quintiles <- quantile(smfq_qcd$MDDPRS, probs = c(0, 0.2, 0.4, 0.6, 0.8, 1))
-labels <- c("very low", "low", "middle", "high", "very high")
-smfq_qcd$quintile <- cut(smfq_qcd$MDDPRS, breaks = quintiles, labels = labels, include.lowest = TRUE)
-
-# get distribution and frequency
-hist(smfq_qcd$mood)
-count <- table(smfq_qcd$quintile)
-count
-
-# get mean and SD of PRS in each group 
-risk_group_types <- unique(smfq_qcd$quintile)  # Get quintiles
-
-very_high <- subset(smfq_qcd, quintile=='very high')
-very_low <- subset(smfq_qcd, quintile=='very low')
-low <- subset(smfq_qcd, quintile=='low')
-high <- subset(smfq_qcd, quintile=='high')
-med <- subset(smfq_qcd, quintile=='middle')
-high_quart <- subset(smfq_qcd, HighQuartile==1) # nunique = 1552
-
-# dataframe for summary statistics
-summary_statistics <- data.frame(Category = character(),
-                                 Mean = numeric(),
-                                 SD = numeric(),
-                                 Count = integer(),  # Change to integer type
-                                 stringsAsFactors = FALSE)
-# Loop through each risk group type
-for (risk_group_type in risk_group_types) {
-  mean_value <- mean(smfq_qcd$MDDPRS[smfq_qcd$risk_group == risk_group_type], na.rm = TRUE)
-  sd_value <- sd(smfq_qcd$MDDPRS[smfq_qcd$risk_group == risk_group_type], na.rm = TRUE)
-  count_value <- count[risk_group_type]
-  summary_statistics <- rbind(summary_statistics, 
-                              data.frame(Category = risk_group_type, 
-                                         Mean = mean_value, 
-                                         SD = sd_value, 
-                                         Count = count_value))
-}
-
-summary_statistics
-
-
-## highest quartile method
-quartiles <- quantile(smfq_qcd$MDDPRS, probs = c(0.8))  # 75th percentile (highest quartile)
-smfq_qcd$HighQuartile <- ifelse(smfq_qcd$MDDPRS >= quartiles, 1, 0)
-head(smfq_qcd)
-
-######### subset complete cases only ######### 
-
-# group df by 'id' and count time points per id
-id_counts <- prepped_df %>%
-  group_by(id) %>%
-  summarise(n_time_points = n_distinct(time))
-# filter to include indiviudals with all 7 tps
-complete_ids <- id_counts %>%
-  filter(n_time_points == 7) %>%
-  pull(id)
-# subset df
-complete_df <- prepped_df %>%
-  filter(id %in% complete_ids)
-# print subsetted 
-head(complete_df)
-length(unique(complete_df$id)) # 1009
+girls <- subset(imputed_df_smfq_smfq, sex==1)
+boys <- subset(imputed_df_smfq_smfq, sex==0)
 
 ######### fit psychonetrics Ising model ##########
 
@@ -155,27 +104,22 @@ length(unique(complete_df$id)) # 1009
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(boys)[3:15]
+vars <- names(imputed_df_smfq_smfq)[3:15]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(boys, vars = vars, groups = "time", estimator = 'ML')
-
+model1 <- Ising(girls, vars = vars, groups = "time")
 ## here add estimator='FIML' to the Ising model for imputation
-
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
-
 # Equal networks (omega = network structure, edges btw nodes equal across time):
 model2 <- model1 %>% groupequal("omega") %>% runmodel
 # Prune-stepup to find a sparse model:
 model2b <- model2 %>% prune(alpha = 0.05) %>% stepup(mi = "mi_equal", alpha = 0.05)
-
 # Equal thresholds (tau = threshold/intercept structure, omega still equal plus external fields equal):
 model3 <- model2 %>% groupequal("tau") %>% runmodel
 # Prune-stepup to find a sparse model:
 model3b <- model3 %>% prune(alpha = 0.05) %>% stepup(mi = "mi_equal", alpha = 0.05)
-
 # Equal beta (beta = inverse temperature, omega and tau also constrained):
 model4 <- model3 %>% groupequal("beta") %>% runmodel
 # Prune-stepup to find a sparse model:
@@ -195,36 +139,221 @@ comparison <- psychonetrics::compare(
   ) %>% arrange(BIC) 
 
 print(comparison)
+best.model <- model2
 
 #extract and plot network
-network_smfq <- getmatrix(model2, "omega")[[1]]
+all_network_smfq <- getmatrix(best.model, "omega")
+network_smfq <- getmatrix(best.model, "omega")[[1]]
 graph_smfq <- qgraph(network_smfq, layout = 'spring', labels = vars, theme = 'colorblind')
 
-#extract temperature (mean value for each time point, can we get error, maybe in bootstrapping?)
-temp_smfq <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
+## overlay centrality plot
+centralityPlot(list(Wave1 = all_network_smfq[[1]]
+                    #,Wave2 = all_network_smfq[[2]], 
+                    #Wave3 = all_network_smfq[[3]], Wave4 = all_network_smfq[[4]], 
+                    #Wave5 = all_network_smfq[[5]], Wave6 = all_network_smfq[[6]],
+                    #Wave7 = all_network_smfq[[7]]
+                    ),
+               theme_bw=FALSE, scale = "z-scores", 
+               include = c("Strength","Closeness","Betweenness"), 
+               labels = vars, orderBy = 'Strength')
+
+#extract temperature
+temp_smfq <- as.numeric(lapply(getmatrix(best.model, "beta"), 'mean'))
+# calculate 95%CIs from standard errors of the beta parameter
+betas_est <- best.model@parameters$est[best.model@parameters$matrix == "beta"]
+betas_se <- best.model@parameters$se[best.model@parameters$matrix == "beta"]
+z = qnorm(0.975)
+upperCI <- temp_smfq + (z*betas_se)
+lowerCI <- temp_smfq - (z*betas_se)
+
+## plot temperature change
+ages <- c(11,13,14,17,18,19,22)
+
+temp_data <- data.frame(Age = ages,
+                        Temperature = 1/temp_smfq,
+                        UpperCI = 1/upperCI,
+                        LowerCI = 1/lowerCI)
+
+temp_data_girls$Sex <- "Females"
+temp_data_boys$Sex <- "Males"
+temp_data <- rbind(temp_data_boys, temp_data_girls)
+
+ggplot(temp_data, aes(x = Age, y = Temperature, color=Sex)) +
+  geom_point(shape = 16) +
+  geom_line() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
+  ylim(0.80, 1.0) +
+  labs(x = "Age", y = "Temperature", title = "Temperature change") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 11),
+        axis.text.y = element_text(size = 11), 
+        plot.title = element_text(hjust = 0.5, size = 12)) +  
+  scale_x_continuous(breaks = ages) + scale_color_manual(values = c("Males" = "blue", "Females" = "orange"))
+
 
 #extract external fields
-fields_smfq <- lapply(getmatrix(model2b, 'tau'), 'mean')
+fields_smfq <- lapply(getmatrix(model2, 'tau'), 'mean')
 
+######################################################
+
+
+######################################################
+################### bootstrap temp ###################
+
+## 1. data, 2. statistic (temperature), 3. run bootstrapping with N boots, 4. get bootstrapped CIs
+
+# 1. check the data (longitudinal binary symptoms +1 -1 encoding)
+head(imputed_df_smfq)
+vars <- names(imputed_df_smfq[,3:15])
+
+# 2. statistic function to extract a vector of temperatures
+temperature_statistic <- function(data, indices) {
+    boot_data <- data[indices, ]
+    # run Ising network model on boot data
+    model <- Ising(boot_data, vars=vars, groups = 'time') %>% groupequal("omega") %>% runmodel
+    # extract temperature estimates from model (1/beta)
+    temp_est <- 1/model@parameters$est[model@parameters$matrix=='beta']
+    # omit t1 as fixed to 1 and stops boot.ci running
+    temp_est <- temp_est[-1]
+    return(temp_est)
+} 
+
+# 3. perform bootstrap resampling
+bootstrap_results <- boot(data = imputed_df_smfq, statistic = temperature_statistic, R = 1000)
+bootstrap_results2 <- boot(data = imputed_df_smfq, statistic = temperature_statistic, R = 3)
+
+# 4a. get CIs
+boot.ci(bootstrap_results, type='bca')
+boot.ci(bootstrap_results2, type='bca')
+# get the output bootstrap statistics
+original <- bootstrap_results$t0
+temperatures <- bootstrap_results$t
+bias <- mean(bootstrap_results$t)-bootstrap_results$t0
+SE <- sd(bootstrap_results$t)
+
+# 4b. get CIs manually
+
+setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/projects/networks/depression_networks')
+## run the above steps 1-3 with 100 and 1000 bootstraps on eddie
+boots100 <- readRDS('from_eddie/bootstrap_R100.rds')
+boots1k <- readRDS('from_eddie/bootstrap_R1000.rds') # one thousand boots
+
+# number of estimates (groups)
+num_columns <- ncol(boots1k$t)
+
+# vectors to store the quantiles
+quantile_975 <- numeric(num_columns)
+quantile_025 <- numeric(num_columns)
+
+# calculate quantiles for each estimate
+for (i in 1:num_columns) {
+  quantile_975[i] <- quantile(boots1k$t[, i], probs = 0.975)
+  quantile_025[i] <- quantile(boots1k$t[, i], probs = 0.025)
+}
+
+cat("97.5th percentile:", quantile_975, "\n")
+cat("2.5th percentile:", quantile_025, "\n")
+
+# histogram of bootstrap temperatures
+hist(boots1k$t, main = "Bootstrap Distribution of Temperature", xlab = "Temperature", 
+     ylab = "Frequency", col = "skyblue", border = "white")
+
+## plot temperature change
+ages <- c(11,13,14,17,18,19,22)
+# plot estimates
+boot_temp_data <- data.frame(Age = ages,
+                        Temperature = c(1, boots1k$t0),
+                        bootUpperCI = c(1,quantile_975),
+                        bootLowerCI = c(1,quantile_025))
+
+# Plot estimates and confidence intervals using ggplot2
+ggplot(boot_temp_data, aes(x = Age, y = Temperature)) +
+  geom_point(color = "blue", shape = 16) +
+  geom_line() +
+  geom_errorbar(aes(ymin = bootLowerCI, ymax = bootUpperCI), width = 0.2) +
+  #ylim(0.80, 1.1) +
+  labs(x = "Age", y = "Temperature", title = "Temperature change") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 11),  
+        axis.text.y = element_text(size = 11),  
+        plot.title = element_text(hjust = 0.5, size = 12)) +  # Center and adjust size of title
+  scale_x_continuous(breaks = ages)
+
+## dataset being bootstrapped at X-sectional time points treating each sample independently
+## Doesn't account for correlations between measurements from same individuals over time?
+## Numbers too small?
+## Binary encoding can't capture variation within the data?
+## Check step 2 all ok?
+
+
+# bootstrap IDs
+###########################################
+
+# Imputed data: remove sex, convert to wide, select vars 
+imputed_df_smfq <- imputed_df_smfq[, !(names(imputed_df_smfq) == "sex")] 
+wide_data <- reshape(imputed_df_smfq, idvar = "id", timevar = "time", direction = "wide") 
+
+# Function to take wide dataset and bootstrap on individuals 
+bootstrap_function <- function(data, indices) {
+  boot_data <- data[indices, ]
+  boot_data$id <- seq(1, nrow(boot_data))
+  # Convert wide dataset to long format
+  boot_data_long <- reshape(boot_data, 
+                            varying=list(unhappy = seq(2, 92, by = 13),
+                                         anhedonia = seq(3, 93, by = 13),
+                                         apathetic = seq(4, 94, by = 13),
+                                         restless = seq(5, 95, by = 13),
+                                         worthless = seq(6, 96, by = 13),
+                                         tearful = seq(7, 97, by = 13),
+                                         distracted = seq(8, 98, by = 13),
+                                         self_loathing = seq(9, 99, by = 13),
+                                         guilty = seq(10, 100, by = 13),
+                                         isolated = seq(11, 101, by = 13),
+                                         unloved = seq(12, 102, by = 13),
+                                         inadequate = seq(13, 103, by = 13),
+                                         incompetent = seq(14, 104, by = 13)),
+                            v.names=c("unhappy","anhedonia","apathetic","restless","worthless","tearful","distracted","self_loathing" ,"guilty",
+                                      "isolated","unloved","inadequate","incompetent"),
+                            direction="long",
+                            time=1:7,
+                            timevar="time")
+  # Select variables for network analysis
+  vars <- names(imputed_df_smfq)[3:15]
+  # Perform network analysis on boot data in long format
+  model <- Ising(boot_data_long, vars = vars) %>% groupequal("omega") %>% runmodel
+  # Extract temperature estimates from model (1/beta)
+  temp_est <- 1 / model@parameters$est[model@parameters$matrix == 'beta']
+  # Omit t1 as it's fixed to 1 and stops boot.ci running
+  temp_est <- temp_est[-1]
+  return(temp_est)
+}
+
+# Number of bootstrap samples
+num_bootstraps <- 5
+
+# Run bootstrap
+bootstrap_results <- boot(data = wide_data, statistic = bootstrap_function, R = num_bootstraps)
+
+
+
+################################################
+################### plotting ################### 
+
+
+#plot heatmaps of symptom covar matrix
 rownames(network_smfq) <- labels[1:13]
 colnames(network_smfq) <- labels[1:13]
 
 heatmap(network_smfq, 
-          symm = TRUE,
-          col = viridis::plasma(100),
-          Rowv = NA,
-          main = paste("ALSPAC"))
+        symm = TRUE,
+        col = viridis::plasma(100),
+        Rowv = NA,
+        main = paste("SMFQ items"))
 
 heatmap.2(network_smfq, 
           symm = TRUE,
           col = viridis::plasma(100),Rowv = NA,
           trace = "none", density.info = "none")
-
-### plotting
-
-pdf('alspac_network_temp.pdf', 7, 5)
-layout(matrix(c(1,1,2,2,2,2,2,3,3,3,3,3,
-                4,4,4,4,5,5,5,5,6,6,6,6), 2, 12, byrow = TRUE))
 
 par(mar = rep(0,4))
 plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
@@ -250,27 +379,73 @@ qgraph(network_smfq, layout = 'spring',
 
 par(mar = rep(2,4), cex.main = 0.8)
 
-plot(1/temp_smfq, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
-     ylim = c(.75, 1.05), 
-     type = 'b', main = 'Change in network temperature')
-axis(1, c(seq(1, 7, 1)), c('11', '13','14', '17','18','19','22'))
-axis(2, c(seq(.7, 2, .05)))
-mtext('(b)', 3, at = .32, padj = -2)
+## plot temperature change
+ages <- c(11,13,14,17,18,19,22)
+# plot estimates
+temp_data <- data.frame(Age = ages,
+                   Temperature = 1/temp_smfq,
+                   UpperCI = 1/upperCI,
+                   LowerCI = 1/lowerCI)
 
-par(mar = c(6, 4, 6, 2))
+# Plot estimates and confidence intervals using ggplot2
+ggplot(temp_data, aes(x = Age, y = Temperature)) +
+  geom_point(color = "blue", shape = 16) +
+  geom_line() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
+  ylim(0.80, 1.0) +
+  labs(x = "Age", y = "Temperature", title = "Temperature change") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 11),  # Adjust size of x-axis tick labels
+        axis.text.y = element_text(size = 11),  # Adjust size of y-axis tick labels
+        plot.title = element_text(hjust = 0.5, size = 12)) +  # Center and adjust size of title
+  scale_x_continuous(breaks = ages)
+
 
 # histograms of overall depression score 
-smfq_qcd$total <- rowSums(smfq_qcd[,3:15])
+imputed_df_smfq_smfq$total <- rowSums(imputed_df_smfq_smfq[,3:15])
 
-hist(smfq_qcd$total[smfq_qcd$time==1], main = 'Age 11', xlab = 'Overall depression')
+hist(imputed_df_smfq_smfq$total[imputed_df_smfq_smfq$time==1], main = 'Age 11', xlab = 'Overall depression')
 mtext('(c)', 3, at = -46, padj = -4)
 
-par(mar = c(6, 3, 6, 3))
+# Set up the layout for multiple plots
+par(mfrow=c(2, 4))
 
-#hist(smfq_qcd$total[smfq_qcd$time==2], main = 'Age 13', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
-hist(smfq_qcd$total[smfq_qcd$time==3], main = 'Age 14', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
+# Plot each histogram
+hist(imputed_df_smfq$total[imputed_df_smfq$time==1], main = 'Age 11', xlab = 'Overall depression')
+hist(imputed_df_smfq$total[imputed_df_smfq$time==2], main = 'Age 13', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
+hist(imputed_df_smfq$total[imputed_df_smfq$time==3], main = 'Age 14', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
+hist(imputed_df_smfq$total[imputed_df_smfq$time==4], main = 'Age 17', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
+hist(imputed_df_smfq$total[imputed_df_smfq$time==5], main = 'Age 18', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
+hist(imputed_df_smfq$total[imputed_df_smfq$time==6], main = 'Age 19', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
+hist(imputed_df_smfq$total[imputed_df_smfq$time==7], main = 'Age 22', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
 
-par(mar = c(6, 2, 6, 4))
+
+plot_images <- list()
+
+# Loop through each time point and create a histogram plot
+for (i in 1:7) {
+  # Create histogram plot
+  hist_plot <- hist(imputed_df_smfq$total[imputed_df_smfq$time==i], 
+                    main = paste("Age", 10 + i), 
+                    xlab = "Overall depression", 
+                    yaxt = "n", 
+                    ylab = "")
+  
+  # Convert the plot to an image
+  plot_image <- image_graph(width = 800, height = 600)
+  plot(hist_plot)
+  dev.off()
+  
+  # Store the image in the list
+  plot_images[[i]] <- plot_image
+}
+
+# Combine the images into a GIF
+gif_file <- image_animate(image_join(plot_images), fps = 1)
+
+# Save the GIF file
+gif_file_path <- "/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/projects/networks/depression_networks/figures/histograms.gif"
+image_write(gif_file, gif_file_path)
 
 hist(smfq_qcd$total[smfq_qcd$time==4], main = 'Age 17', xlab = 'Overall depression',  yaxt = 'n', ylab = '')
 
@@ -312,65 +487,52 @@ NCT_c <- NCT(subset(smfq_qcd, time==3)[,3:15], subset(smfq_qcd, time==4)[,3:15],
 summary(NCT_c)
 plot(NCT_c, what="strength")
 
-###### code from Jonas psychonetrics example #####
+#####
 
-# Extract beta:
-beta <-  unlist(getmatrix(model2b, "beta"))
 
-# Standard errors::
-SEs <- model2b@parameters$se[model2b@parameters$matrix == "beta"]
+# genetic quintile testing
 
-# Make a data frame:
-df <- data.frame(
-  temperature = 1/beta,
-  group = names(beta),
-  lower = 1 / (beta-qnorm(0.975) * SEs),
-  upper = 1 / (beta+qnorm(0.975) * SEs),
-  stringsAsFactors = FALSE
-)
 
-# Some extra values:
-df$fixed <- is.na(df$lower)
-df$group <- factor(df$group)
+# genetically straitfy by quintiles
+quintiles <- quantile(smfq_qcd$MDDPRS, probs = c(0, 0.2, 0.4, 0.6, 0.8, 1))
+labels <- c("very low", "low", "middle", "high", "very high")
+smfq_qcd$quintile <- cut(smfq_qcd$MDDPRS, breaks = quintiles, labels = labels, include.lowest = TRUE)
 
-# Create the plot:
-library("ggplot2")
-g <- ggplot(df,aes(x=as.numeric(group), y = temperature, ymin = lower, ymax = upper)) + 
-  geom_line() + 
-  geom_errorbar(width = 0.05) + 
-  geom_point(cex = 5, colour = "black") +
-  geom_point(aes(colour = fixed), cex = 4) +  theme_bw()  +
-  xlab("") + ylab(expression(paste("Temperature (",1/beta,")"))) + 
-  scale_x_continuous(breaks =  1:7, labels = levels(df$group), expand = c(0.1,0.1)) + 
-  scale_y_continuous(expand = c(0,.1), limits = c(0,1)) + 
-  theme( panel.grid.major.x = element_blank(),panel.grid.minor.x = element_blank())+ 
-  ggtitle(expression(paste("Model 6: 2 groups; ",bold(Omega)," sparse & equal; ",bold(tau)," equal; ",beta," free"))) + 
-  scale_colour_manual(values = c("black","white")) + 
-  theme(legend.position = "none")
+# get distribution and frequency
+hist(smfq_qcd$mood)
+table(smfq_qcd$quintile)
 
-# Plot:
-print(g)
+# get mean and SD of PRS in each group 
+risk_group_types <- unique(smfq_qcd$quintile)  # Get quintiles
 
-# Make labels:
-labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
-            "tearful", "distracted", "self-loathing", "guilty", "isolated", 
-            "unloved", "inadequate", "incompetent")
+very_high <- subset(smfq_qcd, quintile=='very high')
+very_low <- subset(smfq_qcd, quintile=='very low')
+low <- subset(smfq_qcd, quintile=='low')
+high <- subset(smfq_qcd, quintile=='high')
+med <- subset(smfq_qcd, quintile=='middle')
+high_quart <- subset(smfq_qcd, HighQuartile==1) # nunique = 1552
 
-# Extract network structure and thresholds:
-network <- getmatrix(model2b, "omega")[[1]]
-thresholds <- getmatrix(model2b, "tau")[[1]]
+# dataframe for summary statistics
+summary_statistics <- data.frame(Category = character(),
+                                 Mean = numeric(),
+                                 SD = numeric(),
+                                 Count = integer(),  # Change to integer type
+                                 stringsAsFactors = FALSE)
+# Loop through each risk group type
+for (risk_group_type in risk_group_types) {
+  mean_value <- mean(smfq_qcd$MDDPRS[smfq_qcd$risk_group == risk_group_type], na.rm = TRUE)
+  sd_value <- sd(smfq_qcd$MDDPRS[smfq_qcd$risk_group == risk_group_type], na.rm = TRUE)
+  count_value <- count[risk_group_type]
+  summary_statistics <- rbind(summary_statistics, 
+                              data.frame(Category = risk_group_type, 
+                                         Mean = mean_value, 
+                                         SD = sd_value, 
+                                         Count = count_value))
+}
 
-# Scale thresholds for colors:
-scaledthresh <- as.vector(thresholds / (2*max(abs(thresholds))))
+summary_statistics
 
-# Make colors:
-cols <- ifelse(scaledthresh < 0, "red", "darkblue")
-cols[scaledthresh>0] <- qgraph:::Fade(cols[scaledthresh>0],alpha = scaledthresh[scaledthresh>0], "white")
-cols[scaledthresh<0] <- qgraph:::Fade(cols[scaledthresh<0],alpha = abs(scaledthresh)[scaledthresh<0], "white")
-
-# Plot network and save to file:
-qgraph(network, layout = "spring", labels = labels,
-       shape = "rectangle", vsize = 15, vsize2 = 8,
-       theme = "colorblind", color = cols,
-       cut = 0.5, repulsion = 0.9)
-
+## highest quartile method
+quartiles <- quantile(smfq_qcd$MDDPRS, probs = c(0.8))  # 75th percentile (highest quartile)
+smfq_qcd$HighQuartile <- ifelse(smfq_qcd$MDDPRS >= quartiles, 1, 0)
+head(smfq_qcd)

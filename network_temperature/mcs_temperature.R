@@ -1,11 +1,11 @@
 #########################
 ## MCS network temp
 #########################
-library (foreign)
+library(foreign)
 library(bootnet)
 library(psychonetrics)
 library(dplyr)
-library (qgraph)
+library(qgraph)
 library(mice)
 library(ggmice)
 library(VIM)
@@ -17,15 +17,21 @@ setwd('/Volumes/igmm/GenScotDepression/users/poppy/mcs/symptom_data')
 mcs_qcd <- read.table('mcs_sdq_sym_long.txt', check.names = FALSE)
 
 labels <- c("malaise", "worries", "unhappy", "anxiety","fears", "solitary",
-            "friends*","liked*","bullied", "adult-oriented")
+            "friends","liked","bullied", "adultoriented")
 
-colnames(mcs_qcd) <- c('id', 'time', unlist(labels))
+colnames(mcs_qcd) <- c('id', 'sex', 'time', unlist(labels))
 
 #recode variables so that each variable is binary with +1 and -1 
+#friends and liked are reverse coded
 mcs_qcd <- mcs_qcd %>%
-  mutate(across(3:12, ~case_when(
+  mutate(across(c(4:9, 12:13), ~case_when(
     . == 1 ~ 1,
     . == 0 ~ -1,
+    TRUE ~ .
+  ))) %>%
+  mutate(across(10:11, ~case_when(
+    . == 1 ~ -1,
+    . == 0 ~ 1,
     TRUE ~ .
   )))
 
@@ -39,9 +45,9 @@ prepped_df <- merge(template, mcs_qcd, by = c("id", "time"), all.x = TRUE)
 prepped_df <- prepped_df %>% arrange(id, time)
 # NA for non-time invariant columns
 prepped_df <- prepped_df %>%
-  mutate(across(`malaise`:`adult-oriented`, ~replace(., is.na(.), NA)))
+  mutate(across(`malaise`:`adultoriented`, ~replace(., is.na(.), NA)))
 # reorder cols
-prepped_df <- prepped_df[, c("id", "time", names(mcs_qcd)[3:ncol(mcs_qcd)])]
+prepped_df <- prepped_df[, c("id", "sex", "time", names(mcs_qcd)[4:ncol(mcs_qcd)])]
 # Check completed df
 print(prepped_df)
 
@@ -56,14 +62,18 @@ aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TR
 ### make predictor matrix
 # we only want to impute the symptoms vars for now
 predMat <- make.predictorMatrix(prepped_df)
-predMat[,c(1:2)] <- 0
+predMat[,c(1:3)] <- 0
 meth <- make.method(prepped_df)
 
 #### impute
+# if this doesn't work, usually an issue with variable labels, change to plain text and should run 
 imputed <- mice(prepped_df,m=3,maxit=50,meth=meth, predictorMatrix=predMat)
 summary(imputed)
 imputed_df <- complete(imputed,1)
 
+### sex stratification
+boys <- imputed_df %>% filter(sex==0)
+girls <- imputed_df %>% filter(sex==1)
 
 ### fit psychonetrics model
 
@@ -76,24 +86,21 @@ imputed_df <- complete(imputed,1)
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(mcs_qcd)[3:12]
+vars <- names(imputed_df[4:13])
 
 # Form saturated model and run [all params free]
-model1 <- Ising(mcs_qcd, vars = vars, groups = "time", estimator = 'ML')
+model1 <- Ising(imputed_df, vars = vars, groups = "time")
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
-
 # Equal networks (omega = network structure, edges btw nodes equal across time):
 model2 <- model1 %>% groupequal("omega") %>% runmodel
 # Prune-stepup to find a sparse model:
 model2b <- model2 %>% prune(alpha = 0.05) %>% stepup(mi = "mi_equal", alpha = 0.05)
-
 # Equal thresholds (tau = threshold/intercept structure, omega still equal plus external fields equal):
 model3 <- model2 %>% groupequal("tau") %>% runmodel
 # Prune-stepup to find a sparse model:
 model3b <- model3 %>% prune(alpha = 0.05) %>% stepup(mi = "mi_equal", alpha = 0.05)
-
 # Equal beta (beta = inverse temperature, omega and tau also constrained):
 model4 <- model3 %>% groupequal("beta") %>% runmodel
 # Prune-stepup to find a sparse model:
@@ -117,13 +124,20 @@ psychonetrics::compare(
 network_sdq <- getmatrix(model2, "omega")[[1]]
 graph_sdq <- qgraph(network_sdq, layout = 'spring', labels = vars, theme = 'colorblind')
 
-#extract temperature 
+# extract temperature 
 temp_sdq <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
+# calculate 95%CIs from standard errors of the beta parameter
+betas_est <- model2@parameters$est[model2b@parameters$matrix == "beta"]
+betas_se <- model2@parameters$se[model2b@parameters$matrix == "beta"]
+z = qnorm(0.975)
+upperCI <- temp_sdq + (z*betas_se)
+lowerCI <- temp_sdq - (z*betas_se)
 
-#extract external fields
+
+# extract external fields
 fields_sdq <- lapply(getmatrix(model2, 'tau'), 'mean')
 
-
+# heatmaps
 rownames(network_sdq) <- labels
 colnames(network_sdq) <- labels
 
@@ -154,13 +168,28 @@ qgraph(network_sdq, layout = 'spring',
 
 par(mar = rep(2,4), cex.main = 0.8)
 
-plot(1/temp_sdq, bty = 'n', xlab = 'Age', ylab = 'Temperature', xaxt = 'n', yaxt = 'n', 
-     ylim = c(.85, 1), 
-     type = 'b', main = 'Change in network temperature')
-axis(1, c(seq(1, 4, 1)), c('7', '11', '14', '17'))
-axis(2, c(seq(.8, 2, .05)))
-mtext('(b)', 3, at = .32, padj = -2)
+## plot temperature change
+ages <- c(7,11,14,17)
+# plot estimates
+temp_data <- data.frame(Age = ages,
+                        Temperature = 1/temp_sdq,
+                        UpperCI = 1/upperCI,
+                        LowerCI = 1/lowerCI)
 
+# Plot estimates and confidence intervals using ggplot2
+ggplot(temp_data, aes(x = Age, y = Temperature)) +
+  geom_point(color = "blue", shape = 16) +
+  geom_line() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
+  ylim(0.80, 1.0) +
+  labs(x = "Age", y = "Temperature", title = "Temperature change") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 11),  # Adjust size of x-axis tick labels
+        axis.text.y = element_text(size = 11),  # Adjust size of y-axis tick labels
+        plot.title = element_text(hjust = 0.5, size = 12)) +  # Center and adjust size of title
+  scale_x_continuous(breaks = ages)
+
+mtext('(b)', 3, at = .32, padj = -2)
 par(mar = c(6, 4, 6, 2))
 
 # histograms of overall depression score 
