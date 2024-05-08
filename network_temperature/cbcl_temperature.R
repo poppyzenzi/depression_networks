@@ -12,10 +12,8 @@ library(ggmice)
 
 #########################
 #Data
-
-
 setwd("/Volumes/igmm/GenScotDepression/users/poppy/abcd/symptom_data")
-abcd_qcd <- read.table('cbcl_symptoms_binary.txt', check.names = FALSE)
+cbcl_qcd <- read.table('cbcl_symptoms_binary.txt', check.names = FALSE)
 labels <- c('anhedonia','tearful','selfharm','eating','worthlessness',
             'guilt','fatigue','oversleeps','undersleeps','suicidalideation',
             'sleep','lethargic','unhappy')
@@ -35,16 +33,16 @@ labels <- c('anhedonia','tearful','selfharm','eating','worthlessness',
 #Underactive, slow moving, or lacks energy
 #Unhappy, sad, or depressed
 
-colnames(abcd_qcd) <- c('id', 'time', unlist(labels))
+colnames(cbcl_qcd) <- c('id', 'time', unlist(labels))
 
 ## demographics
 demog <- read.table('/Volumes/igmm/GenScotDepression/users/poppy/abcd/abcd_envi_vars.txt')
 sexdf <- demog %>% filter(eventname==0) %>% select(src_subject_id, demo_sex_v2)
 names(sexdf) <- c('id','sex')
-abcd_qcd <- merge(abcd_qcd, sexdf, by='id', all.x=TRUE)
+cbcl_qcd <- merge(cbcl_qcd, sexdf, by='id', all.x=TRUE)
 
 #recode variables so that each variable is binary with +1 and -1 
-abcd_qcd <- abcd_qcd %>%
+cbcl_qcd <- cbcl_qcd %>%
   mutate(across(3:16, ~case_when(
     . == 1 ~ 1,
     . == 0 ~ -1, # male
@@ -53,12 +51,12 @@ abcd_qcd <- abcd_qcd %>%
 
 ########## IMPUTATION ##############
 ### Prepare the df and merge with og df
-template <- expand.grid(id = unique(abcd_qcd$id), time = c(0,2,4,6,8)) # give everyone 5 observations
-prepped_df <- merge(template, abcd_qcd, by = c("id", "time"), all.x = TRUE)
+template <- expand.grid(id = unique(cbcl_qcd$id), time = c(0,2,4,6,8)) # give everyone 5 observations
+prepped_df <- merge(template, cbcl_qcd, by = c("id", "time"), all.x = TRUE)
 # sort df by id and time
 prepped_df <- prepped_df %>% arrange(id, time)
 # reorder cols
-prepped_df <- prepped_df[, c("id", "time", "sex", names(abcd_qcd)[3:15])]
+prepped_df <- prepped_df[, c("id", "time", "sex", names(cbcl_qcd)[3:15])]
 # Fill missing sex values by id
 prepped_df <- prepped_df %>%
   arrange(id, time) %>%
@@ -83,6 +81,7 @@ aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TR
 predMat <- make.predictorMatrix(prepped_df)
 predMat[,c(1:3)] <- 0
 meth <- make.method(prepped_df)
+meth["sex"] <- ""
 
 #### impute
 cbcl_imputed <- mice(prepped_df,m=5,maxit=50, meth=meth,seed=500, predictorMatrix=predMat)
@@ -137,22 +136,23 @@ psychonetrics::compare(
   `8. all parameters equal (sparse)` = model4b
 ) %>% arrange(BIC) 
 
+best.model <- model2
 #extract and plot network
 # "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
-network_cbcl <- getmatrix(model2, "omega")[[1]]
+network_cbcl <- getmatrix(best.model, "omega")[[1]]
 graph_cbcl <- qgraph(network_cbcl, layout = 'spring', labels = vars, theme = 'colorblind')
 
 #extract temperature 
-temp_cbcl <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
+temp_cbcl <-  as.numeric(lapply(getmatrix(best.model, "beta"), 'mean'))
 # calculate 95%CIs from standard errors of the beta parameter
-betas_est <- model2@parameters$est[model2b@parameters$matrix == "beta"]
-betas_se <- model2@parameters$se[model2b@parameters$matrix == "beta"]
+betas_est <- best.model@parameters$est[best.model@parameters$matrix == "beta"]
+betas_se <- best.model@parameters$se[best.model@parameters$matrix == "beta"]
 z = qnorm(0.975)
 upperCI <- temp_cbcl + (z*betas_se)
 lowerCI <- temp_cbcl - (z*betas_se)
 
 #extract external fields (information)
-fields_cbcl <- lapply(getmatrix(model2, 'tau'), 'mean')
+fields_cbcl <- lapply(getmatrix(best.model, 'tau'), 'mean')
 
 rownames(network_cbcl) <- labels
 colnames(network_cbcl) <- labels
@@ -169,39 +169,27 @@ heatmap.2(network_cbcl,
 
 ### plotting
 
-pdf('mcs_network_temp.pdf', 7, 5)
-layout(matrix(c(1,2,2,2,2,3,3,3,3,
-                4,4,4,4,4,5,5,5,5,5), 2, 9, byrow = TRUE))
-
-par(mar = rep(0,4))
-plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
-legend('center', labels, 
-       title = 'BPM items', col = 'darkorange', pch = 19,
-       cex = 0.8, bty = 'n')
-
-# a label at 3rd margin (top) at 0.1 along and right justification (2)
-mtext('(a)', 3, at = .01, padj = 2)
-
 qgraph(network_cbcl, layout = 'spring', 
        groups = list(1:6), palette = 'colorblind',
        legend = FALSE, theme = 'colorblind',
        labels = labels, vsize = 12)
 
-par(mar = rep(2,4), cex.main = 0.8)
-
 ## plot temperature change
 
 ages <- c(10, 11, 12, 13, 14)
-
-# plot estimates
-temp_data <- data.frame(Age = ages,
+temp_data_girls <- data.frame(Age = ages,
                         Temperature = 1/temp_cbcl,
                         UpperCI = 1/upperCI,
                         LowerCI = 1/lowerCI)
 
+
+temp_data_girls$sex <- "Females"
+temp_data_boys$sex <- "Males"
+temp_data <- rbind(temp_data_boys, temp_data_girls)
+
 # Plot estimates and confidence intervals using ggplot2
-ggplot(temp_data, aes(x = Age, y = Temperature)) +
-  geom_point(color = "blue", shape = 16) +
+ggplot(temp_data, aes(x = Age, y = Temperature, color=sex)) +
+  geom_point(shape = 16) +
   geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
   ylim(0.85, 1.1) +

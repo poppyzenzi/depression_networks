@@ -9,16 +9,14 @@ setwd('/Volumes/igmm/GenScotDepression/users/poppy/mcs')
 sdq_wide <- read.table('symptom_data/mcs_sdq_sym_wide.txt')
 sdq_long <- read.table('symptom_data/mcs_sdq_sym_long.txt')
 
-labels <- c("malaise", 
+emo.labels <- c("malaise", 
               "worries", 
                  "unhappy", 
                  "anxiety", 
-                 "fears", 
-                 "solitary",
-                 "friends*",
-                 "liked*",
-                 "bullied",
-                 "adult-oriented")
+                 "fears")
+
+labels <- c("malaise", "worries", "unhappy","anxiety", "fears", "solitary",
+            "friends*","liked*","bullied", "adult-oriented")
 # * reverse scored
 legend <- c("* reverse scored")
 

@@ -16,9 +16,9 @@ library(purrr)
 
 ## read in the data, add predictor variables and labels
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/alspac')
-smfq_qcd <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
+smfq_symptoms <- read.table('smfq_symptoms_qcd.txt', check.names = FALSE)
 env <- read.table('alspac_envi_vars.txt', check.names=FALSE)
-smfq_qcd <- merge(smfq_qcd, env, by='id')
+smfq_qcd <- merge(smfq_symptoms, env, by='id')
 smfq_qcd <- smfq_qcd %>% rename(`sex` = kz021,
                                 `maternal_depression` = r2021,
                                 `bullying` = f8fp470,
@@ -30,7 +30,7 @@ smfq_qcd <- smfq_qcd %>% rename(`sex` = kz021,
 env_labels = list(names(smfq_qcd[,16:ncol(smfq_qcd)]))
 labels <- c("unhappy", "anhedonia", "apathetic", "restless", "worthless",
             "tearful", "distracted", "self_loathing", "guilty", "isolated", 
-            "unloved", "inadequate", "incompetent","sex")
+            "unloved", "inadequate", "incompetent")
 colnames(smfq_qcd) <- c('id', 'time', unlist(labels), unlist(env_labels))
 
 # recode variables so that each symptoms is binary with +1 and -1 
@@ -43,11 +43,9 @@ smfq_qcd <- smfq_qcd %>%
 
 ########## IMPUTATION ##############
 
-# remove non symptom vars
-symptoms_only <- smfq_qcd %>% select(1:16)
 ### Prepare the df and merge with og df
-template <- expand.grid(id = unique(symptoms_only$id), time = 1:7)
-prepped_df <- merge(template, symptoms_only, by = c("id", "time"), all.x = TRUE)
+template <- expand.grid(id = unique(smfq_qcd$id), time = 1:7)
+prepped_df <- merge(template, smfq_qcd, by = c("id", "time"), all.x = TRUE)
 # sort df by id and time
 prepped_df <- prepped_df %>% arrange(id, time)
 # NA for non-time invariant columns
@@ -57,12 +55,8 @@ prepped_df <- prepped_df %>%
 prepped_df <- prepped_df %>%
   group_by(id) %>%
   fill(sex, .direction = "down") %>% fill(sex, .direction = "up")
-# fill PRS for time invariant columns
-#prepped_df <- prepped_df %>%
-#  group_by(id) %>%
-#  fill(mood:neurodev)
 # reorder cols
-prepped_df <- prepped_df[, c("id", "time", names(symptoms_only)[3:ncol(symptoms_only)])]
+prepped_df <- prepped_df[, c("id", "time", unlist(labels), unlist(env_labels))]
 # Check completed df
 print(prepped_df)
 
@@ -76,23 +70,25 @@ aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TR
 ### make predictor matrix
 # we only want to impute the symptoms vars for now
 predMat <- make.predictorMatrix(prepped_df)
-predMat[,c(1:2,16)] <- 0
+predMat[,c(1:2,16:21)] <- 0
 meth <- make.method(prepped_df)
-meth[c("sex")] <- ""
+meth[c("sex","maternal_depression","bullying","child_trauma","sleep","income")] <- ""
 
 #### impute
 imputed_smfq <- mice(prepped_df,m=5,maxit=40,meth=meth,seed=500, predictorMatrix=predMat)
 summary(imputed_smfq)
-imputed_df_smfq_smfq <- complete(imputed_smfq,1)
+imputed_df_smfq <- complete(imputed_smfq,1)
 
-write.table(imputed_df_smfq_smfq, 'alspac_imputed_ising.txt', col.names=TRUE)
+write.table(imputed_df_smfq, 'alspac_imputed_ising.txt', col.names=TRUE)
 
 ########## options to stratify the data ###########
 
+# reappend the env vars 
 # stratify by sex
-girls <- subset(imputed_df_smfq_smfq, sex==1)
-boys <- subset(imputed_df_smfq_smfq, sex==0)
-
+girls <- subset(imputed_df_smfq, sex==1)
+boys <- subset(imputed_df_smfq, sex==0)
+mat_dep <- subset(imputed_df_smfq, maternal_depression==1)
+no_mat_dep <- subset(imputed_df_smfq, maternal_depression==0)
 ######### fit psychonetrics Ising model ##########
 
 #fit an Ising model with increasing constraints representing their hypotheses to this longitudinal assessment 
@@ -104,10 +100,15 @@ boys <- subset(imputed_df_smfq_smfq, sex==0)
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(imputed_df_smfq_smfq)[3:15]
+vars <- names(imputed_df_smfq)[3:15]
+
+# remove age 22
+no.t7 <- imputed_df_smfq[imputed_df_smfq$time != 7, ] %>% as.data.frame()
+boys.no.t7 <- no.t7 %>% filter(sex==0)
+girls.no.t7 <- no.t7 %>% filter(sex==1)
 
 # Form saturated model and run [all params free]
-model1 <- Ising(girls, vars = vars, groups = "time")
+model1 <- Ising(girls.no.t7, vars = vars, groups = "time")
 ## here add estimator='FIML' to the Ising model for imputation
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
@@ -147,12 +148,7 @@ network_smfq <- getmatrix(best.model, "omega")[[1]]
 graph_smfq <- qgraph(network_smfq, layout = 'spring', labels = vars, theme = 'colorblind')
 
 ## overlay centrality plot
-centralityPlot(list(Wave1 = all_network_smfq[[1]]
-                    #,Wave2 = all_network_smfq[[2]], 
-                    #Wave3 = all_network_smfq[[3]], Wave4 = all_network_smfq[[4]], 
-                    #Wave5 = all_network_smfq[[5]], Wave6 = all_network_smfq[[6]],
-                    #Wave7 = all_network_smfq[[7]]
-                    ),
+centralityPlot(list(Wave1 = all_network_smfq[[1]]),
                theme_bw=FALSE, scale = "z-scores", 
                include = c("Strength","Closeness","Betweenness"), 
                labels = vars, orderBy = 'Strength')
@@ -167,9 +163,9 @@ upperCI <- temp_smfq + (z*betas_se)
 lowerCI <- temp_smfq - (z*betas_se)
 
 ## plot temperature change
-ages <- c(11,13,14,17,18,19,22)
-
-temp_data <- data.frame(Age = ages,
+ages <- c(11,13,14,17,18,19)
+income <- 1:5
+temp_data_girls <- data.frame(Age = ages,
                         Temperature = 1/temp_smfq,
                         UpperCI = 1/upperCI,
                         LowerCI = 1/lowerCI)
@@ -177,18 +173,22 @@ temp_data <- data.frame(Age = ages,
 temp_data_girls$Sex <- "Females"
 temp_data_boys$Sex <- "Males"
 temp_data <- rbind(temp_data_boys, temp_data_girls)
+temp_data_matdep$matdep <- "Mat dep"
+temp_data_nomatdep$matdep <- "No mat dep"
+temp_data <- rbind(temp_data_matdep, temp_data_nomatdep)
 
 ggplot(temp_data, aes(x = Age, y = Temperature, color=Sex)) +
   geom_point(shape = 16) +
   geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
-  ylim(0.80, 1.0) +
+  ylim(0.8, 1.0) +
   labs(x = "Age", y = "Temperature", title = "Temperature change") +
   theme_classic() +
   theme(axis.text.x = element_text(size = 11),
         axis.text.y = element_text(size = 11), 
-        plot.title = element_text(hjust = 0.5, size = 12)) +  
-  scale_x_continuous(breaks = ages) + scale_color_manual(values = c("Males" = "blue", "Females" = "orange"))
+        plot.title = element_text(hjust = 0.5, size = 12)) + 
+  scale_x_continuous(breaks = ages) + 
+  scale_color_manual(values = c("Females" = "orange", "Males" = "blue"))
 
 
 #extract external fields

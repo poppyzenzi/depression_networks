@@ -12,12 +12,13 @@ library(VIM)
 
 #########################
 #Data
-
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/mcs/symptom_data')
 mcs_qcd <- read.table('mcs_sdq_sym_long.txt', check.names = FALSE)
 
 labels <- c("malaise", "worries", "unhappy", "anxiety","fears", "solitary",
             "friends","liked","bullied", "adultoriented")
+
+emo.labels <- c("malaise", "worries", "unhappy", "anxiety","fears")
 
 colnames(mcs_qcd) <- c('id', 'sex', 'time', unlist(labels))
 
@@ -29,25 +30,30 @@ mcs_qcd <- mcs_qcd %>%
     . == 0 ~ -1,
     TRUE ~ .
   ))) %>%
-  mutate(across(10:11, ~case_when(
+  mutate(across(10:11, ~case_when( # liked and friends reverse scored
     . == 1 ~ -1,
     . == 0 ~ 1,
     TRUE ~ .
   )))
 
+# emotional scale only
+mcs.emo <- mcs_qcd[1:8]
 
 ########## IMPUTATION ##############
 
 ### Prepare the df and merge with og df
-template <- expand.grid(id = unique(mcs_qcd$id), time = 4:7)
-prepped_df <- merge(template, mcs_qcd, by = c("id", "time"), all.x = TRUE)
+template <- expand.grid(id = unique(mcs.emo$id), time = 5:7) # try 4:7 and 5:7?
+prepped_df <- merge(template, mcs.emo, by = c("id", "time"), all.x = TRUE)
 # sort df by id and time
 prepped_df <- prepped_df %>% arrange(id, time)
 # NA for non-time invariant columns
 prepped_df <- prepped_df %>%
-  mutate(across(`malaise`:`adultoriented`, ~replace(., is.na(.), NA)))
-# reorder cols
-prepped_df <- prepped_df[, c("id", "sex", "time", names(mcs_qcd)[4:ncol(mcs_qcd)])]
+  mutate(across(`malaise`:`fears`, ~replace(., is.na(.), NA)))
+# fill sex (have checked that individuals don't have conflicitng sex)
+prepped_df <- prepped_df %>%
+  group_by(id) %>%
+  fill(sex, .direction = "down") %>% fill(sex, .direction = "up")
+## a lot of missing sex data?
 # Check completed df
 print(prepped_df)
 
@@ -64,16 +70,17 @@ aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TR
 predMat <- make.predictorMatrix(prepped_df)
 predMat[,c(1:3)] <- 0
 meth <- make.method(prepped_df)
+meth[c("sex")] <- ""
 
 #### impute
 # if this doesn't work, usually an issue with variable labels, change to plain text and should run 
-imputed <- mice(prepped_df,m=3,maxit=50,meth=meth, predictorMatrix=predMat)
+imputed <- mice(prepped_df,m=4,maxit=50,meth=meth, predictorMatrix=predMat)
 summary(imputed)
-imputed_df <- complete(imputed,1)
+imputed_df_mcs <- complete(imputed,1)
 
 ### sex stratification
-boys <- imputed_df %>% filter(sex==0)
-girls <- imputed_df %>% filter(sex==1)
+boys <- imputed_df_mcs %>% filter(sex==0)
+girls <- imputed_df_mcs %>% filter(sex==1)
 
 ### fit psychonetrics model
 
@@ -86,10 +93,15 @@ girls <- imputed_df %>% filter(sex==1)
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(imputed_df[4:13])
+vars <- names(imputed_df_mcs[4:ncol(imputed_df_mcs)])
+
+# remove age 7 (t4 from t4-7)
+no.t4 <- imputed_df_mcs[imputed_df_mcs$time != 4, ]
+boys.no.t4 <- no.t4 %>% filter(sex==0)
+girls.no.t4 <- no.t4 %>% filter(sex==1)
 
 # Form saturated model and run [all params free]
-model1 <- Ising(imputed_df, vars = vars, groups = "time")
+model1 <- Ising(girls, vars = vars, groups = "time")
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
@@ -119,78 +131,77 @@ psychonetrics::compare(
   `8. all parameters equal (sparse)` = model4b
 ) %>% arrange(BIC) 
 
+best.model <- model2
+  
 #extract and plot network
 # "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
-network_sdq <- getmatrix(model2, "omega")[[1]]
+network_sdq <- getmatrix(best.model, "omega")[[1]]
 graph_sdq <- qgraph(network_sdq, layout = 'spring', labels = vars, theme = 'colorblind')
 
+## overlay centrality plot
+all_network_sdq <- getmatrix(best.model, "omega")
+centralityPlot(list(Wave1 = all_network_sdq[[1]]),
+theme_bw=FALSE, scale = "z-scores", 
+include = c("Strength","Closeness","Betweenness"), 
+labels = vars, orderBy = 'Strength')
+
 # extract temperature 
-temp_sdq <-  as.numeric(lapply(getmatrix(model2, "beta"), 'mean'))
+temp_sdq <-  as.numeric(lapply(getmatrix(best.model, "beta"), 'mean'))
 # calculate 95%CIs from standard errors of the beta parameter
-betas_est <- model2@parameters$est[model2b@parameters$matrix == "beta"]
-betas_se <- model2@parameters$se[model2b@parameters$matrix == "beta"]
+betas_est <- best.model@parameters$est[best.model@parameters$matrix == "beta"]
+betas_se <- best.model@parameters$se[best.model@parameters$matrix == "beta"]
 z = qnorm(0.975)
 upperCI <- temp_sdq + (z*betas_se)
 lowerCI <- temp_sdq - (z*betas_se)
 
 
 # extract external fields
-fields_sdq <- lapply(getmatrix(model2, 'tau'), 'mean')
+fields_sdq <- lapply(getmatrix(best.model, 'tau'), 'mean')
 
 # heatmaps
-rownames(network_sdq) <- labels
-colnames(network_sdq) <- labels
+rownames(network_sdq) <- emo.labels
+colnames(network_sdq) <- emo.labels
 
 heatmap(network_sdq, 
         symm = TRUE,
         col = viridis::plasma(100),
-        Rowv = NA)
+        Rowv = NA,
+        main = paste("SDQ items"))
+
 
 ### plotting
 
-pdf('mcs_network_temp.pdf', 7, 5)
-layout(matrix(c(1,1,2,2,2,2,2,3,3,3,3,3,
-                4,4,4,4,5,5,5,5,6,6,6,6), 2, 12, byrow = TRUE))
-
-par(mar = rep(0,4))
-plot(NULL ,xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
-legend('center', labels, 
-       title = 'SDQ items', col = 'darkorange', pch = 19,
-       cex = 0.8, bty = 'n')
-
-# a label at 3rd margin (top) at 0.1 along and right justification (2)
-mtext('(a)', 3, at = .01, padj = 2)
-
 qgraph(network_sdq, layout = 'spring', 
-       groups = list(1:10), palette = 'classic',
        legend = FALSE, theme = 'colorblind',
        labels = labels, vsize = 12)
 
-par(mar = rep(2,4), cex.main = 0.8)
-
 ## plot temperature change
-ages <- c(7,11,14,17)
+ages <- c(11,14,17)
 # plot estimates
-temp_data <- data.frame(Age = ages,
+temp_data_girls <- data.frame(Age = ages,
                         Temperature = 1/temp_sdq,
                         UpperCI = 1/upperCI,
                         LowerCI = 1/lowerCI)
 
+temp_data_girls$sex <- "Females"
+temp_data_boys$sex <- "Males"
+temp_data <- rbind(temp_data_boys, temp_data_girls)
+
 # Plot estimates and confidence intervals using ggplot2
-ggplot(temp_data, aes(x = Age, y = Temperature)) +
-  geom_point(color = "blue", shape = 16) +
+ggplot(temp_data, aes(x = Age, y = Temperature, color=sex)) +
+  geom_point(shape = 16) +
   geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
-  ylim(0.80, 1.0) +
+  ylim(0.75, 1.1) +
   labs(x = "Age", y = "Temperature", title = "Temperature change") +
   theme_classic() +
   theme(axis.text.x = element_text(size = 11),  # Adjust size of x-axis tick labels
         axis.text.y = element_text(size = 11),  # Adjust size of y-axis tick labels
         plot.title = element_text(hjust = 0.5, size = 12)) +  # Center and adjust size of title
-  scale_x_continuous(breaks = ages)
+  scale_x_continuous(breaks = ages) +
+  scale_color_manual(values = c("Females" = "orange", "Males" = "blue"))
 
-mtext('(b)', 3, at = .32, padj = -2)
-par(mar = c(6, 4, 6, 2))
+
 
 # histograms of overall depression score 
 mcs_qcd$total <- rowSums(mcs_qcd[,3:12])

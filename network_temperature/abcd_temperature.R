@@ -20,9 +20,9 @@ colnames(abcd_qcd) <- c('id', 'time', unlist(labels))
 
 # demographics
 demog <- read.table('/Volumes/igmm/GenScotDepression/users/poppy/abcd/abcd_envi_vars.txt')
-sexdf <- demog %>% filter(eventname==0) %>% select(src_subject_id, demo_sex_v2)
-names(sexdf) <- c('id','sex')
-abcd_qcd <- merge(abcd_qcd, sexdf, by='id', all.x=TRUE)
+env.vars <- demog %>% filter(eventname==0) %>% select(src_subject_id, demo_sex_v2, fam_history_q6d_depression, demo_comb_income_v2)
+names(env.vars) <- c('id','sex','matdep','income')
+abcd_qcd <- merge(abcd_qcd, env.vars, by='id', all.x=TRUE)
 
 # puberty (at t0,2,4,6,8, t0 is lost as no symptoms)
 puberty <- read.table('../predictors/puberty.vars.txt') %>% select(src_subject_id, eventname, pds_y_ss)
@@ -31,9 +31,9 @@ abcd_qcd <- merge(abcd_qcd, puberty, by=c('id','time'), all.x=TRUE)
 
 #recode variables so that each variable is binary with +1 and -1 
 abcd_qcd <- abcd_qcd %>%
-  mutate(across(3:9, ~case_when(
+  mutate(across(3:10, ~case_when(
     . == 1 ~ 1,
-    . == 0 ~ -1, # male
+    . == 0 ~ -1, # male or symptom off
     TRUE ~ .
   )))
  
@@ -43,15 +43,13 @@ template <- expand.grid(id = unique(abcd_qcd$id), time = 1:8)
 prepped_df <- merge(template, abcd_qcd, by = c("id", "time"), all.x = TRUE)
 # sort df by id and time
 prepped_df <- prepped_df %>% arrange(id, time)
-
 # reorder cols
-prepped_df <- prepped_df[, c("id", "time", "sex", "pubertal_stage", names(abcd_qcd)[3:8])]
+prepped_df <- prepped_df[, c("id", "time", "sex", "pubertal_stage", "matdep", "income", names(abcd_qcd)[3:8])]
 # NA for non-time invariant columns
 prepped_df <- prepped_df %>%
   mutate(across(`worthless`:`worry`, ~replace(., is.na(.), NA)))
 # Check completed df
 print(prepped_df)
-
 ### inspect 
 plot_pattern(prepped_df, square = TRUE, rotate = TRUE)  + 
   theme(plot.title = element_text(hjust = 0.5)) +
@@ -62,18 +60,18 @@ aggr_plot <- aggr(prepped_df, col=c('navyblue','red'), numbers=TRUE, sortVars=TR
 ### make predictor matrix
 # we only want to impute the symptoms vars for now, not pubertal stage etc.
 predMat <- make.predictorMatrix(prepped_df)
-predMat[,c(1:4)] <- 0
+predMat[,c(1:6)] <- 0
 meth <- make.method(prepped_df)
-meth[c("sex", "pubertal_stage")] <- ""
+meth[c("sex", "pubertal_stage","matdep","income")] <- ""
 
 #### impute
-imputed <- mice(prepped_df,m=5,maxit=50, meth=meth,seed=500, predictorMatrix=predMat)
+imputed <- mice(prepped_df,m=5,maxit=50, meth=meth, predictorMatrix=predMat)
 summary(imputed)
-imputed_df <- complete(imputed,1)
+imputed_bpm <- complete(imputed,1)
 
 ### sex stratification
-boys <- imputed_df %>% filter(sex==-1)
-girls <- imputed_df %>% filter(sex==1)
+boys <- imputed_bpm %>% filter(sex==-1)
+girls <- imputed_bpm %>% filter(sex==1)
 
 ### fit psychonetrics model
 
@@ -86,14 +84,14 @@ girls <- imputed_df %>% filter(sex==1)
 #  a sparse network (at least some edges are absent) fits the data best
 
 # Variables to use:
-vars <- names(imputed_df)[5:10]
+vars <- names(imputed_bpm)[7:ncol(imputed_bpm)]
 # drop NA rows for puberty info
 imputed_puberty <- na.omit(imputed_df, cols = "pubertal_stage")
 boys <- imputed_puberty %>% filter(sex==-1)
 girls <- imputed_puberty %>% filter(sex==1)
 
 # Form saturated model and run [all params free]
-model1 <- Ising(girls, vars = vars, groups = "pubertal_stage")
+model1 <- Ising(na.omit(imputed_bpm, cols='income'), vars = vars, groups = "income")
 model1 <- model1 %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
@@ -129,6 +127,12 @@ best.model <- model3
 # "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
 network_bpm <- getmatrix(best.model, "omega")[[1]]
 graph_bpm <- qgraph(network_bpm, layout = 'spring', labels = vars, theme = 'colorblind')
+
+## overlay centrality plot
+centralityPlot(list(Wave1 = network_bpm),
+               theme_bw=FALSE, scale = "z-scores", 
+               include = c("Strength","Closeness","Betweenness"), 
+               labels = vars, orderBy = 'Strength')
 
 #extract temperature 
 temp_bpm <-  as.numeric(lapply(getmatrix(best.model, "beta"), 'mean'))
@@ -170,28 +174,52 @@ qgraph(network_bpm, layout = 'spring',
 ## plot temperature change
 ages <- c(10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14)
 stages <- c('pre','early','mid','late','post')
+income <- c('<5k','5-12k','12-16k','16-25k','25-35k','35-50k','50-75k','75-100k','100-200k', '>200k')
 
 # plot estimates
 temp_data <- data.frame(#Age = ages,
-                        Stage = stages,
+                        #Stage = stages,
+                        Income = income,
                         Temperature = 1/temp_bpm,
                         UpperCI = 1/upperCI,
                         LowerCI = 1/lowerCI)
 
+temp_data_girls$sex <- "Females"
+temp_data_boys$sex <- "Males"
+temp_data <- rbind(temp_data_boys, temp_data_girls)
+
 # convert stage to factor levels to plot x axis in order
 temp_data$Stage <- factor(temp_data$Stage, levels = stages)
+temp_data$Income <- factor(temp_data$Income, levels = income)
 
 # Plot estimates and confidence intervals using ggplot2
-ggplot(temp_data, aes(x = Stage, y = Temperature)) +
-  geom_point(color = "blue", shape = 16) +
-  #geom_line() +
+ggplot(temp_data, aes(x = Income, y = Temperature)) +
+  geom_point(shape = 16) +
+  geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
-  #ylim(0.65, 1.0) +
-  labs(x = "Pubertal stage", y = "Temperature", title = "Temperature change") +
+  ylim(0.8, 1.3) +
+  labs(x = "Income bracket ($)", y = "Temperature", title = "Temperature change") +
   theme_classic() +
-  theme(axis.text.x = element_text(size = 11),  # Adjust size of x-axis tick labels
-        axis.text.y = element_text(size = 11),  # Adjust size of y-axis tick labels
-        plot.title = element_text(hjust = 0.5, size = 12))  # Center and adjust size of title
+  theme(axis.text.x = element_text(size = 11),
+        axis.text.y = element_text(size = 11),  
+        plot.title = element_text(hjust = 0.5, size = 12))  +
+  scale_discrete_manual(breaks = income) + 
+  scale_color_manual(values = c("Females" = "orange", "Males" = "blue"))
+
+
+
+ggplot(temp_data, aes(x = income, y = Temperature)) +
+  geom_point(shape = 16) +
+  geom_line() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
+  ylim(0.75, 1.0) +
+  labs(x = "Age", y = "Temperature", title = "Temperature change") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size = 11),
+        axis.text.y = element_text(size = 11), 
+        plot.title = element_text(hjust = 0.5, size = 12)) + 
+  scale_x_continuous(breaks = ages) + 
+  scale_color_manual(values = c("Mat dep" = "green", "No mat dep" = "deeppink"))
 
 # histograms of overall depression score 
 abcd_qcd$total <- rowSums(abcd_qcd[,3:8])
