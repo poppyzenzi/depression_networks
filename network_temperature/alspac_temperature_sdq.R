@@ -30,7 +30,7 @@ sdq.emo <- sdq_qcd[1:8]
 ########## IMPUTATION ##############
 
 ### Prepare the df and merge with og df
-template <- expand.grid(id = unique(sdq.emo$id), time = 1:5)
+template <- expand.grid(id = unique(sdq.emo$id), time = 2:5) # exclude t1 (age7)
 prepped_df <- merge(template, sdq.emo, by = c("id", "time"), all.x = TRUE)
 # sort df by id and time
 prepped_df <- prepped_df %>% arrange(id, time)
@@ -67,6 +67,8 @@ write.table(imputed_df_sdq, 'alspac_imputed_ising_sdq.txt', col.names=TRUE)
 
 # Variables to use:
 vars <- names(imputed_df_sdq)[4:ncol(imputed_df_sdq)]
+boys <- imputed_df_sdq %>% filter(sex==1)
+girls <- imputed_df_sdq %>% filter(sex==2)
 
 # Form saturated model and run [all params free]
 model1 <- Ising(imputed_df_sdq, vars = vars, groups = "time")
@@ -101,7 +103,7 @@ comparison <- psychonetrics::compare(
 ) %>% arrange(BIC) 
 
 print(comparison)
-best.model <- model2
+best.model <- model3
 
 ### CHANGE TO SDQ
 #extract and plot network
@@ -124,7 +126,7 @@ z = qnorm(0.975)
 upperCI <- temp_sdq + (z*betas_se)
 lowerCI <- temp_sdq - (z*betas_se)
 ## plot temperature change
-ages <- c(7,10,12,13,17)
+ages <- c(10,12,13,17)
 temp_data <- data.frame(Age = ages,
                         Temperature = 1/temp_sdq,
                         UpperCI = 1/upperCI,

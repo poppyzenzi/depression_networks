@@ -17,6 +17,10 @@ emo.labels <- c("malaise",
 
 labels <- c("malaise", "worries", "unhappy","anxiety", "fears", "solitary",
             "friends*","liked*","bullied", "adult-oriented")
+
+mcs.emo.long <- sdq_long[1:8]
+colnames(mcs.emo.long) <- c('id','sex', 'Sweep', unlist(emo.labels))
+
 # * reverse scored
 legend <- c("* reverse scored")
 
@@ -39,19 +43,21 @@ write.csv(frequency_table, file="symptom_data/mcs_symptom_frequencies.csv")
 # empty list
 result_list <- list()
 
+mcs.emo.long.2 <- na.omit(mcs.emo.long)
+
 # run bootnet loop over sweeps
 for (sweep_value in c(5,6,7)) {
-  timepoint <- sdq_long$Sweep == sweep_value
-  data_subset <- sdq_long[timepoint, 3:12]
-  results <- bootnet(data_subset, nBoots=100, default="ggmModSelect")
+  timepoint <- mcs.emo.long.2$Sweep == sweep_value
+  data_subset <- mcs.emo.long.2[timepoint, 4:8]
+  results <- bootnet(data_subset, nBoots=100, default="IsingFit")
   result_list[[as.character(sweep_value)]] <- results
 }
 
 # Loop through the results and generate plots
 for (sweep_value in names(result_list)) {
   results <- result_list[[sweep_value]]
-  plot(results$sample, label = labels)
-  #title(paste("Sweep =", sweep_value), adj=0.8)
+  plot(results$sample, label = emo.labels)
+  title(paste("Sweep =", sweep_value), adj=0.8)
 }
 
 # ===============================

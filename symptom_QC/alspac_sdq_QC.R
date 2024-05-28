@@ -69,16 +69,12 @@ labels <- c("malaise",
             "bullied",
             "adult-oriented")
 
+alspac_sdq_wide <- alspac_sdq_wide %>%
+  mutate_at(vars(4:13), ~case_when(
+    . %in% c(1, 2, 3) ~ if_else(. == 1, -1, 1),
+    TRUE ~ NA_real_
+  ))
 
-alspac_sdq_wide[4:13] <- alspac_sdq_wide[4:13] %>%
-  replace(. == -10, NA) %>%
-  replace(. == -8, NA) %>%
-  replace(. == -6, NA) %>%
-  replace(. == -1, NA) %>%
-  replace(. == 1, -1) %>%
-  replace(. == 2, 1) %>%
-  replace(. == 3, 1) %>%
-  replace(. == 9, NA) 
 
 colnames(alspac_sdq_wide) <- c('id', 'sex', 'time', unlist(labels))
 

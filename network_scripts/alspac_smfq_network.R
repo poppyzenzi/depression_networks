@@ -75,7 +75,7 @@ prop_table <- freq_dat %>%
   summarize(proportion = sum(value == 1) / n()) %>% # calculate proportion of "yes" responses
   spread(time, proportion, fill = 0)
 
-print(prop_table %>% selec(1,2,4,6))
+print(prop_table %>% select(1,2,4,6))
 
 write.csv(prop_table, file="alspac_symptom_proportions.csv")
 write.csv(prop_table %>% select(1,2,4,6), file="alspac_symptom_proportions_3wav.csv")

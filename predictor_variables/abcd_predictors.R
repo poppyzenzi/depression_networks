@@ -44,7 +44,21 @@ merged_df <- reduce(dfs, full_join, by = c('src_subject_id', 'eventname'), suffi
 
 #predictors <- merged_df[variables]
 
+################### self-report ethnicity ################
 
+ethnicity.data <- as.data.frame(merged_df[c('src_subject_id','eventname','race_ethnicity')])
+
+ethnicity.data <- ethnicity.data %>% 
+  filter(eventname == 0 | eventname == 2) %>% 
+  dplyr::select(src_subject_id,race_ethnicity) %>%
+  distinct(.) %>% na.omit(.)
+
+unmatched_ethnicities <- ethnicity.data[duplicated(ethnicity.data$src_subject_id), ]
+print(unmatched_ethnicities)
+
+write.table(ethnicity.data, '/Volumes/igmm/GenScotDepression/users/poppy/abcd/predictors/ethnicity.data.txt', col.names=TRUE)
+
+colnames(ethnicity.data) <- c('id','ethnicity')
 ################### puberty data ################
 # 1 - prepuberty; 2 - early puberty; 3 - mid puberty; 4 - late puberty; 5 - post puberty
 
