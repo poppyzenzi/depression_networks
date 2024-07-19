@@ -9,6 +9,7 @@ library(qgraph)
 library(mice)
 library(ggmice)
 library(VIM)
+
 ############################# LOAD AND QC ######################################
 # read in data and label cols
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/mcs/symptom_data')
@@ -68,9 +69,11 @@ meth <- make.method(prepped_df)
 meth[c("sex")] <- ""
 
 #### impute (if error, check var labels)
-imputed <- mice(prepped_df, m=33 ,maxit=20 ,meth=meth, seed=123, predictorMatrix=predMat)
+imputed_mcs <- mice(prepped_df, m=33 ,maxit=20 ,meth=meth, seed=123, predictorMatrix=predMat)
+saveRDS(imputed_mcs, 'imputed_mcs_33.rds')
+
 # extract eand combine pooled datasets into long format
-imputed_list <- lapply(1:33, function(i) complete(imputed, action = i))
+imputed_list <- lapply(1:33, function(i) complete(imputed_mcs, action = i))
 all_imputed <- bind_rows(imputed_list)
 
 # sanity check: count the number of duplicate rows based on 'id' and 'time' (14,958*4 = 59832)
@@ -119,7 +122,7 @@ boys.no.t4 <- boys[boys$time != 4,]
 girls.no.t4 <- girls[girls$time != 4,]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(imputed_mcs_recode, vars = vars, groups = "time") %>% runmodel
+model1 <- Ising(boys, vars = vars, groups = "time") %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
 # Equal networks (omega = network structure, edges btw nodes equal across time):
@@ -152,7 +155,9 @@ best.model <- model2
 # extract and plot network
 # "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
 network_sdq <- getmatrix(best.model, "omega")[[1]]
-graph_sdq <- qgraph(network_sdq, layout = 'spring', labels = vars, theme = 'colorblind')
+graph_sdq <- qgraph(network_sdq, layout = 'spring', labels = vars, 
+                     theme = 'colorblind', label.prop=0.99, node.width=1.4, 
+                     label.norm='000000')
 
 # centrality plot
 all_network_sdq <- getmatrix(best.model, "omega")
@@ -184,31 +189,51 @@ heatmap(network_sdq,
 
 # gather temp data
 ages <- c(11,14,17)
-temp_data <- data.frame(Age = ages,
+mcs_temp_data_boys <- data.frame(Age = ages,
                         Temperature = 1/temp_sdq,
                         UpperCI = 1/upperCI,
                         LowerCI = 1/lowerCI)
 
-temp_data_girls$sex <- "Females"
-temp_data_boys$sex <- "Males"
-temp_data <- rbind(temp_data_boys, temp_data_girls)
+mcs_temp_data_girls$sex <- "Females"
+mcs_temp_data_boys$sex <- "Males"
+mcs_temp_data <- rbind(mcs_temp_data_boys, mcs_temp_data_girls)
 
-# plot temperature change and confidence intervals
-ggplot(temp_data, aes(x = Age, y = Temperature)) +
+# test whether rate of decrease is sig different
+# look at interaction term age:sex
+model <- lmer(Temperature ~ Age * sex + (1 | Age), data = mcs_temp_data)
+summary(model)
+
+# plot overlay temperature change and confidence intervals
+ggplot(mcs_temp_data, aes(x = Age, y = Temperature, color=sex)) +
   geom_point(shape = 16) +
   geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
-  ylim(0.7, 1.0) +
+  ylim(0.6, 1.0) +
   labs(x = "Age", y = "Temperature", title = "Temperature change") +
   theme_classic() +
   theme(axis.text.x = element_text(size = 11),
         axis.text.y = element_text(size = 11),  
         plot.title = element_text(hjust = 0.5, size = 12), legend.position='none') +  # center and adjust size of title
   scale_x_continuous(breaks = ages) +
-  scale_color_manual(values = c("Females" = "orange", "Males" = "blue"))
+  scale_color_manual(values = c("Females" = "darkgrey", "Males" = "black"))
 
+# panel plot
+ggplot(temp_data, aes(x = Age, y = Temperature, group = sex)) +
+  geom_line(color = "black") +                    
+  geom_point(color = "black") +     
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.2, color = "black") + 
+  facet_wrap(~ sex) +                        
+  theme_bw() +    
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14),
+    legend.position = 'NULL',
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    strip.text = element_text(size = 16)) +
+  labs(x = "Age", y = "Temperature")
 
-####################### BOOTSTRAPPING #######################
+####################### BOOTSTRAPPING TEMPERATURE #########################
 
 # read in results from eddie/datastore
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/mcs')
@@ -238,20 +263,21 @@ ggplot(boot_ci_data, aes(x = Age, y = Temperature)) +
   geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI, color = CI_Type), width = 0.1, show.legend = TRUE) +
   geom_errorbar(aes(ymin = LowerBootCI, ymax = UpperBootCI, color = BootCI_Type), width = 0.1, show.legend = TRUE) +
-  ylim(0.6, 1.0) +
-  labs(x = "Age", y = "Temperature", title = "Temperature change") +
+  ylim(0.58, 1.0) +
+  labs(x = "Age (years)", y = "Temperature") +
   theme_classic() +
-  theme(axis.text.x = element_text(size = 11),
-        axis.text.y = element_text(size = 11), 
-        plot.title = element_text(hjust = 0.5, size = 12),
-        legend.position='NULL') + 
+  theme(axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.position = 'NULL',
+    axis.ticks.length = unit(14, "points")) +
   scale_x_continuous(breaks = ages) +
   scale_color_manual(values = c('Analytical 95% CIs' = 'purple', 'Bootstrapped 95% CIs' = 'red'), name=NULL) +
   guides(color = guide_legend(override.aes = list(linetype = c("solid", "solid"))))
 
 
-
-###### SENSITIVITY/SUPPLEMENTAL ANALYSES ######
+##################### SENSITIVITY/SUPPLEMENTAL ANALYSES ########################
 
 # histograms of overall depression score 
 mcs_qcd$total <- rowSums(mcs_qcd[,3:12])
@@ -267,11 +293,49 @@ dev.off()
 ## summary score distribution
 # add sum score col
 mcs_mode_imputed <- mcs_mode_imputed %>%
-  dplyr::mutate(sumscore = rowSums(dplyr::select(., malaise:fears)))
+  dplyr::mutate(total = rowSums(dplyr::select(., malaise:fears)))
+
+mcs_variance <- mcs_mode_imputed %>%
+  group_by(time) %>%
+  summarise(variance = var(total, na.rm = TRUE))
+
+print(mcs_variance)
+
 # histogram of sumscore (can plot for [-1,1] and [0,1] encoding)
-ggplot(mcs_mode_imputed, aes(x = sumscore)) +
+ggplot(mcs_mode_imputed, aes(x = total)) +
   geom_histogram(binwidth = 2, fill = "skyblue", color = "black") +
   facet_wrap(~time, ncol = 3) +
   labs(title = "Distribution of Sumscore by Time",
        x = "Sumscore",
        y = "Frequency")
+
+####### variance of original sample and complete cases [for Table 1]
+
+# labelled t4-6 but have checked ages 11,14,17 
+mcs.sumscores <- read.csv('/Volumes/igmm/GenScotDepression/users/poppy/mcs/4_sdq_waves.csv') %>%
+  dplyr::select(c(1,4:6))
+
+colnames(mcs.sumscores) <- c('id','t1','t2','t3')
+
+# complete cases variance
+complete_cases <- mcs.sumscores[complete.cases(mcs.sumscores), ]
+summary_stats <- complete_cases %>%
+  summarise(across(t1:t3, list(mean = mean, SD = sd), na.rm = TRUE)) %>%
+  pivot_longer(cols = everything(), names_to = c("Variable", ".value"), names_sep = "_")
+print(summary_stats)
+
+mcs.long <- complete_cases %>% 
+    pivot_longer(
+        cols = `t1`:`t3`, 
+       names_to = "time",
+       values_to = "value"
+     )
+
+ggplot(mcs.long, aes(x = value)) +
+  geom_histogram(binwidth = 2, fill = "skyblue", color = "black") +
+  facet_wrap(~time, ncol = 3) +
+  labs(title = "Distribution of Sumscore by Time",
+       x = "Sumscore",
+       y = "Frequency")
+#############################################
+

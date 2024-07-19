@@ -3,6 +3,7 @@ library(tidyr)
 library(boot)
 library(psychonetrics)
 
+## run remotely on Eddie cluster 
 ## bootstrap temperature CIs
 
 # read in imputed data
@@ -19,10 +20,8 @@ labels_list <- list(
   mcs = c("malaise", "worries", "unhappy", "anxiety","fears")
 )
 
-
 # create empty list to store wide cohort dfs
 wide_cohort_dfs <- list()
-
 
 # iterate over cohorts > make wide dataframe > add to list
 for (cohort_name in names(cohorts)) {
@@ -31,7 +30,6 @@ for (cohort_name in names(cohorts)) {
                      idvar = "id", timevar = "time", direction = "wide")
   wide_cohort_dfs[[cohort_name]] <- wide_df
 }
-
 
 # Function to bootstrap on individuals (wide) > convert to long > extract temperature
 bootstrap_function <- function(data, indices, labels) {

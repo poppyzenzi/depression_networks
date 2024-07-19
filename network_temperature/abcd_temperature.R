@@ -1,6 +1,6 @@
-#############################################################################
+##############################################################################
 ############################# ABCD network temp ##############################
-#############################################################################
+##############################################################################
 library (foreign)
 library(bootnet)
 library(psychonetrics)
@@ -68,9 +68,11 @@ meth <- make.method(prepped_df)
 meth[c("sex")] <- ""
 
 #### impute
-imputed <- mice(prepped_df, m=19, maxit=20, meth=meth, seed=123, predictorMatrix=predMat)
+imputed_bpm <- mice(prepped_df, m=19, maxit=20, meth=meth, seed=123, predictorMatrix=predMat)
+saveRDS(imputed_bpm, 'imputed_bpm_19.rds')
+
 # extract and combine pooled datasets into long format
-imputed_list <- lapply(1:19, function(i) complete(imputed, action = i))
+imputed_list <- lapply(1:19, function(i) complete(imputed_bpm, action = i))
 all_imputed <- bind_rows(imputed_list)
 # sanity check: count the number of duplicate rows based on 'id' and 'time' (11726*8 = 93808)
 nrow(all_imputed %>%
@@ -95,11 +97,13 @@ head(abcd_mode_imputed) ## nrow = 93808
 
 ################################################################################
 
-### sex stratification
+## alternative samples
+
+# sex stratification
 boys <- abcd_mode_imputed %>% filter(sex==-1)
 girls <- abcd_mode_imputed %>% filter(sex==1)
 
-## [0,1] encoding
+# [0,1] encoding
 imputed_abcd_recode <- abcd_mode_imputed %>%
   mutate(across(4:9, ~case_when(
     . == 1 ~ 1,
@@ -108,11 +112,12 @@ imputed_abcd_recode <- abcd_mode_imputed %>%
   )))
 
 ########################## MULTIGROUP ISING MODEL ##############################
+
 # vars to use
-vars <- names(abcd_mode_imputed)[4:ncol(abcd_mode_imputed)]
+vars <- names(abcd_mode_imputed)[4:9]
 
 # Form saturated model and run [all params free]
-model1 <- Ising(imputed_abcd_recode, vars = vars, groups = "time") %>% runmodel
+model1 <- Ising(boys, vars = vars, groups = "time") %>% runmodel
 # Prune-stepup to find a sparse model:
 model1b <- model1 %>% prune(alpha = 0.05) %>%  stepup(alpha = 0.05)
 # Equal networks (omega = network structure, edges btw nodes equal across time)
@@ -145,7 +150,9 @@ best.model <- model2
 # extract and plot network
 # "classic","colorblind","gray","Hollywood","Borkulo", "gimme","TeamFortress","Reddit","Leuven"or"Fried".
 network_bpm <- getmatrix(best.model, "omega")[[1]]
-graph_bpm <- qgraph(network_bpm, layout = 'spring', labels = vars, theme = 'colorblind')
+graph_bpm <- qgraph(network_bpm, layout = 'spring', labels = vars, 
+                    theme = 'colorblind', label.prop=0.99, node.width=1.4, 
+                    label.norm='000000')
 
 # overlay centrality plot
 centralityPlot(list(Wave1 = network_bpm),
@@ -181,27 +188,24 @@ heatmap.2(network_bpm,
 
 ## plotting
 ages <- c(10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14)
-#stages <- c('pre','early','mid','late','post')
-#income <- c('<5k','5-12k','12-16k','16-25k','25-35k','35-50k','50-75k','75-100k','100-200k', '>200k')
 
 # gather temp data for plotting
-temp_data <- data.frame(Age = ages,
-                        #Stage = stages,
-                        #Income = income,
+abcd_temp_data_boys <- data.frame(Age = ages,
                         Temperature = 1/temp_bpm,
                         UpperCI = 1/upperCI,
                         LowerCI = 1/lowerCI)
 
-temp_data_girls$sex <- "Females"
-temp_data_boys$sex <- "Males"
-temp_data <- rbind(temp_data_boys, temp_data_girls)
+abcd_temp_data_girls$sex <- "Females"
+abcd_temp_data_boys$sex <- "Males"
+abcd_temp_data <- rbind(abcd_temp_data_boys, abcd_temp_data_girls)
 
-# convert stage to factor levels to plot x axis in order
-#temp_data$Stage <- factor(temp_data$Stage, levels = stages)
-#temp_data$Income <- factor(temp_data$Income, levels = income)
+# test whether rate of decrease is sig different
+# look at interaction term age:sex
+model <- lmer(Temperature ~ Age * sex + (1 | Age), data = mcs_temp_data)
+summary(model)
 
 # plot temp change with CIs
-ggplot(temp_data, aes(x = Age, y = Temperature)) +
+ggplot(abcd_temp_data, aes(x = Age, y = Temperature, color=sex)) +
   geom_point(shape = 16) +
   geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.1) +
@@ -213,9 +217,25 @@ ggplot(temp_data, aes(x = Age, y = Temperature)) +
         plot.title = element_text(hjust = 0.5, size = 12), legend.position='none')  +
   scale_x_continuous(breaks = ages) +
   #scale_discrete_manual(breaks = income) + 
-  scale_color_manual(values = c("Females" = "orange", "Males" = "blue"))
+  scale_color_manual(values = c("Females" = "darkgrey", "Males" = "black"))
 
-####################### BOOTSTRAPPING #######################
+# panel plot
+ggplot(temp_data, aes(x = Age, y = Temperature, group = sex)) +
+  geom_line(color = "black") +                    
+  geom_point(color = "black") +     
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.2, color = "black") + 
+  facet_wrap(~ sex) +                        
+  theme_bw() +    
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 14),
+    legend.position = 'NULL',
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    strip.text = element_text(size = 16)) +
+  labs(x = "Age", y = "Temperature")
+
+######################### BOOTSTRAPPING ############################
 
 # read in results from eddie/datastore
 setwd('/Volumes/igmm/GenScotDepression/users/poppy/abcd')
@@ -240,18 +260,23 @@ boot_ci_data <- boot_ci_data %>%
   mutate(CI_Type = 'Analytical 95% CIs',
          BootCI_Type = 'Bootstrapped 95% CIs')
 
+
+# plot temp with bootstrapped and analytical CIs
 ggplot(boot_ci_data, aes(x = Age, y = Temperature)) +
   geom_point(shape = 16) +
   geom_line() +
   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI, color = CI_Type), width = 0.1, show.legend = TRUE) +
   geom_errorbar(aes(ymin = LowerBootCI, ymax = UpperBootCI, color = BootCI_Type), width = 0.1, show.legend = TRUE) +
-  ylim(0.55, 1.0) +
-  labs(x = "Age", y = "Temperature", title = "Temperature change") +
+  ylim(0.58, 1.0) +
+  labs(x = "Age (years)", y = "Temperature") +
   theme_classic() +
-  theme(axis.text.x = element_text(size = 11),
-        axis.text.y = element_text(size = 11), 
-        plot.title = element_text(hjust = 0.5, size = 12),
-        legend.position='NULL') + 
+  theme(
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.position = 'NULL',
+    axis.ticks.length = unit(14, "points")) + 
   scale_x_continuous(breaks = ages) +
   scale_color_manual(values = c('Analytical 95% CIs' = 'purple', 'Bootstrapped 95% CIs' = 'red'), name=NULL) +
   guides(color = guide_legend(override.aes = list(linetype = c("solid", "solid"))))
@@ -260,47 +285,65 @@ ggplot(boot_ci_data, aes(x = Age, y = Temperature)) +
 
 ################## SENSITIVITY/SUPPLEMENTAL ANALYSES ########################
 
-## histograms of overall depression score 
-abcd_qcd$total <- rowSums(abcd_qcd[,3:8])
-
-breaks <- seq(min(abcd_qcd$total, na.rm = TRUE), max(abcd_qcd$total, na.rm = TRUE), length.out = 8)
-
-hist(abcd_qcd$total[abcd_qcd$time==2], main = 'Age 11', xlab = 'Overall depression', breaks=breaks)
-mtext('(c)', 3, at = -46, padj = -4)
-
-par(mar = c(6, 2, 6, 4))
-
-hist(abcd_qcd$total[abcd_qcd$time==8], main = 'Age 14', xlab = 'Overall depression', breaks=breaks)
-
-dev.off()
-
 ## distribution of sumscores
 # Add a new col 'sumscore' 
-imputed_bpm_recode <- imputed_bpm_recode %>%
-  dplyr::mutate(sumscore = rowSums(dplyr::select(., worthless:worry)))
+abcd_mode_imputed <- abcd_mode_imputed %>%
+  dplyr::mutate(total = rowSums(dplyr::select(., worthless:worry)))
 
-# plot histograms of sumscore across time (age)
-ggplot(imputed_bpm_recode, aes(x = sumscore)) +
-  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+abcd_variance <- abcd_mode_imputed %>%
+    group_by(time) %>%
+    summarise(variance = var(total, na.rm = TRUE))
+
+abcd_mode_imputed %>%
+  group_by(time) %>%
+  summarise(mean = mean(total, na.rm = TRUE))
+
+print(abcd_variance)
+
+ggplot(abcd_variance, aes(x = time, y = variance)) +
+  geom_line() +
+  geom_point() +
+  labs(title='ABCD',
+       x = "Time",
+       y = "Variance of Sumscore") +
+  theme_minimal()
+
+# plot histograms of sumscore across time (age) - can change encoding
+ggplot(abcd_mode_imputed, aes(x = total)) +
+  geom_histogram(binwidth = 2, fill = "skyblue", color = "black") +
   facet_wrap(~time, ncol = 4) +
-  labs(title = "Distribution of Sumscore for [0,1] Encoding by Time in ABCD Study",
+  labs(title = "Distribution of Sumscore for [-1,1] Encoding by Time in ABCD Study",
        x = "Sumscore",
        y = "Frequency") + geom_vline(xintercept = 0, linetype = "dashed", color = "black")
 
+#######################################
 
-#### other stratification groups
+# variance of original summary score data [for Table 1 in MS]
 
-## puberty stratification
-pre <- imputed_bpm %>% filter(pubertal_stage==1)
-early <- imputed_bpm %>% filter(pubertal_stage==2)
-mid <- imputed_bpm %>% filter(pubertal_stage==3)
-late <- imputed_bpm %>% filter(pubertal_stage==4)
-post <- imputed_bpm %>% filter(pubertal_stage==5)
+bpm.sumscores <- read.table('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/projects/networks/data/abcd5.0_bpm_sumscores.txt')
+colnames(bpm.sumscores) <- c('id','t1','t2','t3','t4','t5','t6','t7','t8')
+bpm.sumscores[bpm.sumscores == -9999] <- NA
 
-## income stratification
-income <- c('<5k','5-12k','12-16k','16-25k','25-35k','35-50k','50-75k','75-100k','100-200k', '>200k')
-bracket1 <- imputed_bpm %>% filter(income==1)
-bracket3 <- imputed_bpm %>% filter(income==3)
-bracket5 <- imputed_bpm %>% filter(income==5)
-bracket7 <- imputed_bpm %>% filter(income==7)
-bracket9 <- imputed_bpm %>% filter(income==9)
+# complete cases variance
+complete_cases <- bpm.sumscores[complete.cases(bpm.sumscores), ]
+summary_stats <- complete_cases %>%
+  summarise(across(t1:t8, list(mean = mean, SD = sd), na.rm = TRUE)) %>%
+  pivot_longer(cols = everything(), names_to = c("Variable", ".value"), names_sep = "_")
+print(summary_stats)
+
+
+abcd.long <- complete_cases %>% 
+  pivot_longer(
+    cols = `t1`:`t8`, 
+    names_to = "time",
+    values_to = "value"
+  )
+
+ggplot(abcd.long, aes(x = value)) +
+  geom_histogram(binwidth = 2, fill = "skyblue", color = "black") +
+  facet_wrap(~time, ncol = 4) +
+  labs(title = "Distribution of Sumscore by Time",
+       x = "Sumscore",
+       y = "Frequency")
+
+
