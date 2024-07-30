@@ -15,3 +15,7 @@ depression_networks.Rproj
 /symptom_QC
 /network_scripts
 alspac_imputed_ising_mode.txt
+network_temperature/alspac_prs_quintiles.R
+network_temperature/alspac_quintiles.txt
+network_temperature/alspac_temperature_sdq.R
+network_temperature/cbcl_temperature.R
